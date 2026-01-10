@@ -1,63 +1,90 @@
 version: '3.8'
 
 services:
-  docker-updater:
-    image: python:3.11-alpine
-    container_name: docker-updater
+  dum:
+    build: .
+    image: dum:latest
+    container_name: dum
     restart: unless-stopped
     volumes:
-      # Mount Docker socket to interact with Docker daemon
-      - /var/run/docker.sock:/var/run/docker.sock
-      # Mount the updater script
-      - ./docker_updater.py:/app/docker_updater.py
-      # Mount configuration
-      - ./config.json:/app/config.json
+      # Mount Docker socket to interact with Docker daemon (read-only for safety)
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Mount configuration directory
+      - ./config:/config
       # Persistent state storage
-      - ./state:/app/state
-    working_dir: /app
+      - ./state:/state
     environment:
       - PYTHONUNBUFFERED=1
       - CHECK_INTERVAL=3600
-    command: >
-      sh -c "
-      apk add --no-cache docker-cli &&
-      pip install --no-cache-dir requests &&
-      python docker_updater.py config.json --state /app/state/docker_update_state.json --daemon --interval $${CHECK_INTERVAL}
-      "
+      - LOG_LEVEL=DEBUG
+    # Default: Run in dry-run mode for safety
+    command: ["--dry-run", "--daemon", "--interval", "${CHECK_INTERVAL:-3600}", "--log-level", "${LOG_LEVEL:-DEBUG}", "--state", "/state/docker_update_state.json", "/config/config.json"]
     networks:
-      - docker-updater-net
+      - dum-net
     labels:
       - "com.docker.updater.description=Automated Docker image updater with tag tracking"
+      - "com.docker.updater.mode=dry-run"
 
-  # Alternative: Run as a cron job instead of daemon
-  docker-updater-cron:
-    image: python:3.11-alpine
-    container_name: docker-updater-cron
+  # Alternative: Run in production mode (auto-update enabled)
+  dum-prod:
+    build: .
+    image: dum:latest
+    container_name: dum-prod
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./docker_updater.py:/app/docker_updater.py
-      - ./config.json:/app/config.json
-      - ./state:/app/state
-    working_dir: /app
+      - ./config:/config
+      - ./state:/state
     environment:
       - PYTHONUNBUFFERED=1
-    entrypoint: >
-      sh -c "
-      apk add --no-cache docker-cli dcron &&
-      pip install --no-cache-dir requests &&
-      echo '0 * * * * cd /app && python docker_updater.py config.json --state /app/state/docker_update_state.json' | crontab - &&
-      crond -f -l 2
-      "
+      - CHECK_INTERVAL=3600
+      - LOG_LEVEL=INFO
+    # Production mode - actually performs updates
+    command: ["--daemon", "--interval", "${CHECK_INTERVAL:-3600}", "--log-level", "${LOG_LEVEL:-INFO}", "--state", "/state/docker_update_state.json", "/config/config.json"]
     networks:
-      - docker-updater-net
+      - dum-net
+    labels:
+      - "com.docker.updater.description=Automated Docker image updater with tag tracking"
+      - "com.docker.updater.mode=production"
     profiles:
-      - cron
+      - prod
+
+  # Web UI service
+  dum-webui:
+    build:
+      context: .
+      dockerfile: Dockerfile.webui
+    image: dum-webui:latest
+    container_name: dum-webui
+    restart: unless-stopped
+    ports:
+      - "5050:5050"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./config:/config
+      - ./state:/state
+    environment:
+      - PYTHONUNBUFFERED=1
+      - CONFIG_FILE=/config/config.json
+      - STATE_FILE=/state/docker_update_state.json
+      - DRY_RUN=true
+      - LOG_LEVEL=INFO
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+    networks:
+      - dum-net
+    labels:
+      - "com.docker.updater.description=Web UI for Docker image updater"
+    profiles:
+      - webui
 
 networks:
-  docker-updater-net:
+  dum-net:
     driver: bridge
 
-# To use the cron version instead of the daemon:
-# docker-compose --profile cron up -d
+# Usage:
+# 1. CLI dry-run daemon only: docker-compose up -d
+# 2. CLI production daemon only: docker-compose --profile prod up -d
+# 3. Web UI only: docker-compose --profile webui up -d
+# 4. Web UI + CLI dry-run daemon: docker-compose --profile webui up -d dum dum-webui
+# 5. Web UI + CLI production daemon: docker-compose --profile webui --profile prod up -d
 
