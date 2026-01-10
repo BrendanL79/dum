@@ -79,11 +79,6 @@ class ImageState:
     tag: str
     digest: str
     last_updated: str
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ImageState':
-        """Create ImageState from dictionary."""
-        return cls(**data)
 
 
 class DockerImageUpdater:
@@ -196,11 +191,11 @@ class DockerImageUpdater:
                 with open(self.state_file, 'r') as f:
                     data = json.load(f)
                     
-            # Validate and convert to ImageState objects
+            # Convert to ImageState objects
             state = {}
             for image, image_data in data.items():
                 try:
-                    state[image] = ImageState.from_dict(image_data)
+                    state[image] = ImageState(**image_data)
                 except (TypeError, KeyError) as e:
                     self.logger.warning(f"Invalid state data for {image}: {e}")
                     
