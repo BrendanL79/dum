@@ -486,20 +486,15 @@ class DockerImageUpdater:
                 self.logger.debug(f"Container {container_name} not found or no config")
                 return None
 
-            # Get the image ID from the container
-            image_id = container_info.get('Image', '')
-            if not image_id:
-                self.logger.debug(f"No image ID found for container {container_name}")
+            # Get the image reference from the container config
+            image_ref = container_info.get('Config', {}).get('Image', '')
+            if not image_ref:
+                self.logger.debug(f"No image reference found for container {container_name}")
                 return None
 
-            # Use docker image ls to find tags for this image ID that match our regex pattern
-            try:
-                result = subprocess.run(
-                    ['docker', 'image', 'ls', '--format', '{{.Repository}}:{{.Tag}}', '--filter', f'reference={image}'],
-                    capture_output=True,
-                    text=True,
-                    check=True
-                )
+            # Extract tag from image reference
+            if ':' in image_ref and image_ref.startswith(image):
+                tag = image_ref.split(':', 1)[1]
 
                 # Get cached compiled pattern
                 pattern = self.compiled_patterns.get(regex)
@@ -507,32 +502,13 @@ class DockerImageUpdater:
                     self.logger.debug(f"Pattern not found in cache: '{regex}'")
                     return None
 
-                # Check each image tag to find one that matches the regex
-                for line in result.stdout.strip().split('\n'):
-                    if ':' in line:
-                        img_name, tag = line.rsplit(':', 1)
-                        # Check if this image matches and the tag matches the regex
-                        if img_name == image and pattern.match(tag):
-                            # Verify this tag points to the same image ID as the container
-                            tag_inspect = subprocess.run(
-                                ['docker', 'image', 'inspect', '--format', '{{.Id}}', f'{image}:{tag}'],
-                                capture_output=True,
-                                text=True,
-                                check=True
-                            )
-                            if tag_inspect.stdout.strip() == image_id:
-                                self.logger.debug(f"Found matching tag for {container_name}: {tag}")
-                                return tag
-
-            except subprocess.CalledProcessError as e:
-                self.logger.debug(f"Error checking local images: {e}")
-
-            # Fallback: just return the tag from the image reference
-            image_ref = container_info.get('Config', {}).get('Image', '')
-            if ':' in image_ref and image_ref.startswith(image):
-                tag = image_ref.split(':', 1)[1]
-                self.logger.debug(f"Using tag from container config: {tag}")
-                return tag
+                # Check if tag matches the regex pattern
+                if pattern.match(tag):
+                    self.logger.debug(f"Found matching tag for {container_name}: {tag}")
+                    return tag
+                else:
+                    self.logger.debug(f"Tag {tag} doesn't match pattern for {container_name}")
+                    return None
 
             return None
         except Exception as e:
