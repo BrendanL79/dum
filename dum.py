@@ -475,7 +475,69 @@ class DockerImageUpdater:
         except (subprocess.CalledProcessError, json.JSONDecodeError, IndexError) as e:
             self.logger.error(f"Error getting container config: {e}")
             return None
-            
+
+    def _get_container_current_tag(self, container_name: str, image: str, regex: str) -> Optional[str]:
+        """Get the current version tag of a running container."""
+        try:
+            container_info = self._get_container_config(container_name)
+            if not container_info:
+                self.logger.debug(f"Container {container_name} not found or no config")
+                return None
+
+            # Get the image ID from the container
+            image_id = container_info.get('Image', '')
+            if not image_id:
+                self.logger.debug(f"No image ID found for container {container_name}")
+                return None
+
+            # Use docker image ls to find tags for this image ID that match our regex pattern
+            try:
+                result = subprocess.run(
+                    ['docker', 'image', 'ls', '--format', '{{.Repository}}:{{.Tag}}', '--filter', f'reference={image}'],
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+
+                # Compile regex pattern
+                try:
+                    pattern = re.compile(regex)
+                except re.error as e:
+                    self.logger.debug(f"Invalid regex pattern '{regex}': {e}")
+                    return None
+
+                # Check each image tag to find one that matches the regex
+                for line in result.stdout.strip().split('\n'):
+                    if ':' in line:
+                        img_name, tag = line.rsplit(':', 1)
+                        # Check if this image matches and the tag matches the regex
+                        if img_name == image and pattern.match(tag):
+                            # Verify this tag points to the same image ID as the container
+                            tag_inspect = subprocess.run(
+                                ['docker', 'image', 'inspect', '--format', '{{.Id}}', f'{image}:{tag}'],
+                                capture_output=True,
+                                text=True,
+                                check=True
+                            )
+                            if tag_inspect.stdout.strip() == image_id:
+                                self.logger.debug(f"Found matching tag for {container_name}: {tag}")
+                                return tag
+
+            except subprocess.CalledProcessError as e:
+                self.logger.debug(f"Error checking local images: {e}")
+
+            # Fallback: just return the tag from the image reference
+            image_ref = container_info.get('Config', {}).get('Image', '')
+            if ':' in image_ref and image_ref.startswith(image):
+                tag = image_ref.split(':', 1)[1]
+                self.logger.debug(f"Using tag from container config: {tag}")
+                return tag
+
+            return None
+        except Exception as e:
+            self.logger.debug(f"Could not get current tag for {container_name}: {e}")
+            return None
+
     def _update_container(self, container_name: str, image: str, tag: str) -> bool:
         """
         Update a running container with a new image.
@@ -721,39 +783,49 @@ class DockerImageUpdater:
                 
                 # Check if this is different from our saved state
                 saved_state = self.state.get(image)
-                
+
                 if not saved_state or saved_state.digest != digest:
-                    old_tag = saved_state.tag if saved_state else 'unknown'
-                    self.logger.info(f"UPDATE AVAILABLE: {old_tag} -> {matching_tag}")
-                    
-                    updates_found.append({
-                        'image': image,
-                        'base_tag': base_tag,
-                        'old_tag': old_tag,
-                        'new_tag': matching_tag,
-                        'digest': digest
-                    })
-                    
-                    if auto_update:
-                        # Pull the new images
-                        if self._pull_image(image, base_tag):
-                            self._pull_image(image, matching_tag)
-                            
-                            # Update container if specified
-                            if container_name:
-                                self._update_container(container_name, image, base_tag)
-                                
-                            # Cleanup old images if requested
-                            if cleanup:
-                                self._cleanup_old_images(image)
-                                
-                            # Update state
-                            self.state[image] = ImageState(
-                                base_tag=base_tag,
-                                tag=matching_tag,
-                                digest=digest,
-                                last_updated=datetime.now().isoformat()
-                            )
+                    # Try to get current tag from saved state, or from running container
+                    old_tag = saved_state.tag if saved_state else None
+                    if not old_tag and container_name:
+                        old_tag = self._get_container_current_tag(container_name, image, regex)
+                    if not old_tag:
+                        old_tag = 'unknown'
+
+                    # Only report update if tags are actually different
+                    if old_tag != matching_tag:
+                        self.logger.info(f"UPDATE AVAILABLE: {old_tag} -> {matching_tag}")
+
+                        updates_found.append({
+                            'image': image,
+                            'base_tag': base_tag,
+                            'old_tag': old_tag,
+                            'new_tag': matching_tag,
+                            'digest': digest
+                        })
+
+                        if auto_update:
+                            # Pull the new images
+                            if self._pull_image(image, base_tag):
+                                self._pull_image(image, matching_tag)
+
+                                # Update container if specified
+                                if container_name:
+                                    self._update_container(container_name, image, base_tag)
+
+                                # Cleanup old images if requested
+                                if cleanup:
+                                    self._cleanup_old_images(image)
+
+                                # Update state
+                                self.state[image] = ImageState(
+                                    base_tag=base_tag,
+                                    tag=matching_tag,
+                                    digest=digest,
+                                    last_updated=datetime.now().isoformat()
+                                )
+                    else:
+                        self.logger.info(f"Already up to date: {matching_tag}")
                 else:
                     self.logger.info("No update available")
                     
