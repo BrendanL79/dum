@@ -396,15 +396,23 @@ function updateRegexTest(card) {
     const testInput = card.querySelector('.regex-test-input');
     const hintDiv = card.querySelector('.regex-test-hint');
 
-    // Reset to default hint if no test input or no regex pattern
-    if (!testInput.value || !regexInput.value) {
+    // Reset to default hint if no test input
+    if (!testInput.value) {
         hintDiv.className = 'regex-test-hint';
         hintDiv.textContent = 'Enter a tag to test if it matches the regex pattern';
         return;
     }
 
+    // Show error if test input but no meaningful regex pattern
+    const pattern = regexInput.value.trim();
+    if (!pattern || pattern === '^') {
+        hintDiv.className = 'regex-test-hint no-match';
+        hintDiv.textContent = 'Enter a regex pattern first';
+        return;
+    }
+
     try {
-        const regex = new RegExp(regexInput.value);
+        const regex = new RegExp(pattern);
         if (regex.test(testInput.value)) {
             hintDiv.className = 'regex-test-hint match';
             hintDiv.textContent = `"${testInput.value}" matches the pattern`;
