@@ -13,7 +13,6 @@ import sys
 import time
 import logging
 import tempfile
-import shlex
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Any, Union
 from pathlib import Path
@@ -26,8 +25,9 @@ import requests
 from urllib.parse import urlparse
 import jsonschema
 
-# Platform-specific imports
-if platform.system() != 'Windows':
+# Platform-specific imports and constant
+IS_WINDOWS = platform.system() == 'Windows'
+if not IS_WINDOWS:
     import fcntl
 else:
     import msvcrt
@@ -78,11 +78,6 @@ class ImageState:
     tag: str
     digest: str
     last_updated: str
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ImageState':
-        """Create ImageState from dictionary."""
-        return cls(**data)
 
 
 class DockerImageUpdater:
@@ -105,6 +100,7 @@ class DockerImageUpdater:
         self.logger = self._setup_logging(log_level)
         
         # Load configuration and state
+        self.compiled_patterns = {}  # Cache for compiled regex patterns
         self.config = self._load_config()
         self.state = self._load_state()
         
@@ -132,12 +128,13 @@ class DockerImageUpdater:
             # Validate against schema
             jsonschema.validate(config, CONFIG_SCHEMA)
             
-            # Validate regex patterns
+            # Validate and cache regex patterns
             for image_config in config.get('images', []):
+                regex_pattern = image_config['regex']
                 try:
-                    re.compile(image_config['regex'])
+                    self.compiled_patterns[regex_pattern] = re.compile(regex_pattern)
                 except re.error as e:
-                    raise ValueError(f"Invalid regex pattern '{image_config['regex']}': {e}")
+                    raise ValueError(f"Invalid regex pattern '{regex_pattern}': {e}")
                     
             return config
             
@@ -157,10 +154,7 @@ class DockerImageUpdater:
         lock_file = file_path.with_suffix('.lock')
         fp = open(lock_file, 'w')
         try:
-            if platform.system() != 'Windows':
-                # Unix-like systems
-                fcntl.flock(fp, fcntl.LOCK_EX)
-            else:
+            if IS_WINDOWS:
                 # Windows
                 while True:
                     try:
@@ -168,19 +162,22 @@ class DockerImageUpdater:
                         break
                     except IOError:
                         time.sleep(0.1)
+            else:
+                # Unix-like systems
+                fcntl.flock(fp, fcntl.LOCK_EX)
             yield
         finally:
-            if platform.system() != 'Windows':
-                fcntl.flock(fp, fcntl.LOCK_UN)
-            else:
+            if IS_WINDOWS:
                 try:
                     msvcrt.locking(fp.fileno(), msvcrt.LK_UNLCK, 1)
-                except:
+                except (OSError, IOError):
                     pass
+            else:
+                fcntl.flock(fp, fcntl.LOCK_UN)
             fp.close()
             try:
                 lock_file.unlink()
-            except:
+            except (OSError, FileNotFoundError):
                 pass
                 
     def _load_state(self) -> Dict[str, ImageState]:
@@ -193,11 +190,11 @@ class DockerImageUpdater:
                 with open(self.state_file, 'r') as f:
                     data = json.load(f)
                     
-            # Validate and convert to ImageState objects
+            # Convert to ImageState objects
             state = {}
             for image, image_data in data.items():
                 try:
-                    state[image] = ImageState.from_dict(image_data)
+                    state[image] = ImageState(**image_data)
                 except (TypeError, KeyError) as e:
                     self.logger.warning(f"Invalid state data for {image}: {e}")
                     
@@ -239,34 +236,40 @@ class DockerImageUpdater:
     def _parse_image_reference(self, image: str) -> Tuple[str, str, str]:
         """
         Parse image reference into registry, namespace, and repository.
-        
+
         Args:
             image: Image reference (e.g., 'ubuntu', 'linuxserver/calibre', 'gcr.io/project/image')
-            
+
         Returns:
             Tuple of (registry, namespace, repository)
         """
-        # Check if custom registry is specified
-        if '/' in image and any(image.startswith(prefix) for prefix in ['http://', 'https://', 'localhost']):
+        # Handle explicit protocol prefixes first
+        if image.startswith(('http://', 'https://')):
             parts = image.split('/', 1)
             registry = parts[0]
             remaining = parts[1] if len(parts) > 1 else ''
-        elif image.count('/') >= 2 and '.' in image.split('/')[0]:
-            # Likely a custom registry (e.g., gcr.io/project/image)
-            parts = image.split('/', 2)
-            registry = parts[0]
-            remaining = '/'.join(parts[1:])
         else:
-            registry = DEFAULT_REGISTRY
-            remaining = image
-            
-        # Parse namespace and repository
+            # Split once to check first component
+            parts = image.split('/', 1)
+            first_part = parts[0]
+
+            # Registry indicators: contains '.', is localhost, or has port ':'
+            if '.' in first_part or first_part == 'localhost' or ':' in first_part:
+                # First part is a custom registry
+                registry = first_part
+                remaining = parts[1] if len(parts) > 1 else ''
+            else:
+                # No custom registry detected, use default
+                registry = DEFAULT_REGISTRY
+                remaining = image
+
+        # Parse namespace and repository from remaining path
         if '/' in remaining:
             namespace, repo = remaining.split('/', 1)
         else:
             namespace = DEFAULT_NAMESPACE
             repo = remaining
-            
+
         return registry, namespace, repo
         
     def _get_docker_token(self, registry: str, namespace: str, repo: str) -> Optional[str]:
@@ -409,11 +412,10 @@ class DockerImageUpdater:
             self.logger.error(f"Could not get tags for {image}")
             return None
             
-        # Compile regex pattern
-        try:
-            pattern = re.compile(regex_pattern)
-        except re.error as e:
-            self.logger.error(f"Invalid regex pattern '{regex_pattern}': {e}")
+        # Get cached compiled pattern
+        pattern = self.compiled_patterns.get(regex_pattern)
+        if not pattern:
+            self.logger.error(f"Pattern not found in cache: '{regex_pattern}'")
             return None
             
         # Find tags matching the pattern
@@ -484,54 +486,28 @@ class DockerImageUpdater:
                 self.logger.debug(f"Container {container_name} not found or no config")
                 return None
 
-            # Get the image ID from the container
-            image_id = container_info.get('Image', '')
-            if not image_id:
-                self.logger.debug(f"No image ID found for container {container_name}")
+            # Get the image reference from the container config
+            image_ref = container_info.get('Config', {}).get('Image', '')
+            if not image_ref:
+                self.logger.debug(f"No image reference found for container {container_name}")
                 return None
 
-            # Use docker image ls to find tags for this image ID that match our regex pattern
-            try:
-                result = subprocess.run(
-                    ['docker', 'image', 'ls', '--format', '{{.Repository}}:{{.Tag}}', '--filter', f'reference={image}'],
-                    capture_output=True,
-                    text=True,
-                    check=True
-                )
-
-                # Compile regex pattern
-                try:
-                    pattern = re.compile(regex)
-                except re.error as e:
-                    self.logger.debug(f"Invalid regex pattern '{regex}': {e}")
-                    return None
-
-                # Check each image tag to find one that matches the regex
-                for line in result.stdout.strip().split('\n'):
-                    if ':' in line:
-                        img_name, tag = line.rsplit(':', 1)
-                        # Check if this image matches and the tag matches the regex
-                        if img_name == image and pattern.match(tag):
-                            # Verify this tag points to the same image ID as the container
-                            tag_inspect = subprocess.run(
-                                ['docker', 'image', 'inspect', '--format', '{{.Id}}', f'{image}:{tag}'],
-                                capture_output=True,
-                                text=True,
-                                check=True
-                            )
-                            if tag_inspect.stdout.strip() == image_id:
-                                self.logger.debug(f"Found matching tag for {container_name}: {tag}")
-                                return tag
-
-            except subprocess.CalledProcessError as e:
-                self.logger.debug(f"Error checking local images: {e}")
-
-            # Fallback: just return the tag from the image reference
-            image_ref = container_info.get('Config', {}).get('Image', '')
+            # Extract tag from image reference
             if ':' in image_ref and image_ref.startswith(image):
                 tag = image_ref.split(':', 1)[1]
-                self.logger.debug(f"Using tag from container config: {tag}")
-                return tag
+
+                # Get cached compiled pattern
+                pattern = self.compiled_patterns.get(regex)
+                if not pattern:
+                    self.logger.debug(f"Pattern not found in cache: '{regex}'")
+                    return None
+
+                # Check if tag matches the regex pattern
+                if pattern.match(tag):
+                    self.logger.debug(f"Found matching tag for {container_name}: {tag}")
+                    return tag
+
+                self.logger.debug(f"Tag {tag} doesn't match pattern for {container_name}")
 
             return None
         except Exception as e:
@@ -562,16 +538,9 @@ class DockerImageUpdater:
             return False
             
         try:
-            # Save container ID for cleanup
-            container_id = container_info['Id']
-            
             # Build docker run command preserving all settings
             run_cmd = self._build_run_command(container_name, full_image, container_info)
-            
-            if self.dry_run:
-                self.logger.info(f"[DRY RUN] Would execute: {' '.join(run_cmd)}")
-                return True
-                
+
             # Stop the container
             self.logger.info(f"Stopping container {container_name}...")
             subprocess.run(['docker', 'stop', container_name], check=True)
@@ -635,7 +604,7 @@ class DockerImageUpdater:
         # Environment variables
         for env_var in config.get('Env', []):
             # Skip Docker-injected variables
-            if not any(env_var.startswith(prefix) for prefix in ['PATH=', 'HOSTNAME=']):
+            if not any(env_var.startswith(prefix) for prefix in ('PATH=', 'HOSTNAME=')):
                 cmd.extend(['-e', env_var])
                 
         # Port mappings
@@ -652,15 +621,16 @@ class DockerImageUpdater:
         # Volume mappings
         for mount in container_info.get('Mounts', []):
             if mount['Type'] == 'bind':
-                mount_str = f"{mount['Source']}:{mount['Destination']}"
-                if mount.get('Mode'):
-                    mount_str += f":{mount['Mode']}"
-                cmd.extend(['-v', mount_str])
+                source = mount['Source']
             elif mount['Type'] == 'volume':
-                mount_str = f"{mount['Name']}:{mount['Destination']}"
-                if mount.get('Mode'):
-                    mount_str += f":{mount['Mode']}"
-                cmd.extend(['-v', mount_str])
+                source = mount['Name']
+            else:
+                continue
+
+            mount_str = f"{source}:{mount['Destination']}"
+            if mount.get('Mode'):
+                mount_str += f":{mount['Mode']}"
+            cmd.extend(['-v', mount_str])
                 
         # Network mode
         if host_config.get('NetworkMode') and host_config['NetworkMode'] != 'default':
@@ -749,7 +719,7 @@ class DockerImageUpdater:
                         capture_output=True,
                         check=False  # Don't fail if image is in use
                     )
-                except:
+                except (subprocess.SubprocessError, OSError):
                     pass
                     
         except subprocess.CalledProcessError as e:

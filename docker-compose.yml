@@ -32,7 +32,8 @@ services:
     container_name: dum-prod
     restart: unless-stopped
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      # Mount Docker socket with write access for updates (production mode)
+      - /var/run/docker.sock:/var/run/docker.sock:rw
       - ./config:/config
       - ./state:/state
     environment:

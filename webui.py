@@ -8,6 +8,7 @@ import os
 import threading
 import time
 from datetime import datetime
+from functools import wraps
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from flask import Flask, render_template, jsonify, request, Response
@@ -22,7 +23,8 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Global variables
 updater: Optional[DockerImageUpdater] = None
-updater_thread: Optional[threading.Thread] = None
+daemon_thread: Optional[threading.Thread] = None
+daemon_stop_event = threading.Event()
 last_check_time: Optional[datetime] = None
 last_updates: List[Dict[str, Any]] = []
 update_history: List[Dict[str, Any]] = []
@@ -49,6 +51,16 @@ def load_updater():
     except Exception as e:
         logger.error(f"Failed to load updater: {e}")
         return False
+
+
+def require_updater(f):
+    """Decorator to check if updater is loaded before executing route."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not updater:
+            return jsonify({'error': 'Updater not loaded'}), 503
+        return f(*args, **kwargs)
+    return decorated
 
 
 def run_check():
@@ -90,14 +102,12 @@ def run_check():
 def daemon_worker():
     """Background worker for daemon mode."""
     global daemon_running
-    
+
     while daemon_running:
         run_check()
-        # Sleep with interruption support
-        for _ in range(daemon_interval):
-            if not daemon_running:
-                break
-            time.sleep(1)
+        # Wait with efficient interruption support
+        if daemon_stop_event.wait(timeout=daemon_interval):
+            break
 
 
 @app.route('/')
@@ -122,20 +132,16 @@ def api_status():
 
 
 @app.route('/api/config')
+@require_updater
 def api_config():
     """Get current configuration."""
-    if not updater:
-        return jsonify({'error': 'Updater not loaded'}), 503
-        
     return jsonify(updater.config)
 
 
 @app.route('/api/config', methods=['POST'])
+@require_updater
 def api_update_config():
     """Update configuration."""
-    if not updater:
-        return jsonify({'error': 'Updater not loaded'}), 503
-        
     try:
         new_config = request.json
         # Validate and save new config
@@ -152,11 +158,9 @@ def api_update_config():
 
 
 @app.route('/api/state')
+@require_updater
 def api_state():
     """Get current state."""
-    if not updater:
-        return jsonify({'error': 'Updater not loaded'}), 503
-        
     state_dict = {
         image: {
             'base_tag': state.base_tag,
@@ -206,34 +210,36 @@ def api_history():
 def api_daemon():
     """Start/stop daemon mode."""
     global daemon_running, daemon_thread, daemon_interval
-    
+
     action = request.json.get('action')
-    
+
     if action == 'start':
         if daemon_running:
             return jsonify({'error': 'Daemon already running'}), 409
-            
+
         if not updater:
             if not load_updater():
                 return jsonify({'error': 'Failed to load updater'}), 503
-                
+
         # Get interval from request or use default
         daemon_interval = request.json.get('interval', 3600)
-        
+
         daemon_running = True
+        daemon_stop_event.clear()
         daemon_thread = threading.Thread(target=daemon_worker)
         daemon_thread.start()
-        
+
         return jsonify({'status': 'started', 'interval': daemon_interval})
-        
+
     elif action == 'stop':
         if not daemon_running:
             return jsonify({'error': 'Daemon not running'}), 409
-            
+
         daemon_running = False
+        daemon_stop_event.set()
         if daemon_thread:
             daemon_thread.join(timeout=5)
-            
+
         return jsonify({'status': 'stopped'})
         
     else:
