@@ -118,7 +118,7 @@ def run_check():
                         'image': update['image'],
                         'old_tag': update['old_tag'],
                         'new_tag': update['new_tag'],
-                        'applied': not updater.dry_run
+                        'applied': not updater.dry_run and update.get('auto_update', False)
                     })
                 save_history()  # Persist to disk
 

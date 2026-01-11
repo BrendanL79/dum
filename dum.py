@@ -881,7 +881,8 @@ class DockerImageUpdater:
                             'base_tag': base_tag,
                             'old_tag': old_tag,
                             'new_tag': matching_tag,
-                            'digest': digest
+                            'digest': digest,
+                            'auto_update': auto_update
                         })
 
                         if auto_update:
