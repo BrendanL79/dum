@@ -22,9 +22,10 @@ Python-based Docker image auto-updater that tracks version-specific tags matchin
 
 ## Key Files
 - `dum.py`: Main updater logic with DockerImageUpdater class (~900 lines)
-- `webui.py`: Flask-SocketIO web interface with gunicorn production server (~280 lines)
-- `docker-compose.yml`: Five deployment modes (dry-run, prod, webui, webui+dry-run, webui+prod)
+- `webui.py`: Flask-SocketIO web interface with gunicorn production server (~320 lines)
+- `docker-compose.yml`: Six deployment modes (dry-run, prod, webui, webui-prod, webui+dry-run, webui+prod)
 - `config/config.json`: Image definitions with regex patterns (runtime, gitignored)
+- `config/history.json`: Persistent update history (runtime, auto-managed, max 500 entries)
 - `state/docker_update_state.json`: Tracks current versions/digests (runtime, gitignored)
 - `static/js/app.js`: WebUI frontend with card-based config editor (~790 lines)
 - `templates/index.html`: WebUI dashboard structure
@@ -55,12 +56,20 @@ Python-based Docker image auto-updater that tracks version-specific tags matchin
 - **Production hardening**: Cross-platform support (Unix fcntl, Windows msvcrt), proper subprocess usage
 - **Code simplification (PR #2)**: Regex pattern caching, consolidated container inspection, dead code removal, `require_updater` decorator, `threading.Event` for efficient daemon sleep, DOM element caching, optional chaining
 
-## Deployment Modes (5 Options)
+## Bug Fixes (cleanup-bugfixes branch)
+- **Socket.IO threading**: Added `namespace='/'` to all `socketio.emit()` calls in background threads
+- **Null tag handling**: Registry API can return `{"tags": null}`; fixed with `or []` pattern
+- **Container config nulls**: Docker API returns `null` for empty arrays (CapAdd, Devices, etc.); fixed all `.get(key, [])` patterns
+- **History 'Applied' status**: Now correctly checks both `dry_run` mode AND `auto_update` per-image setting
+- **Defensive loading**: History file gracefully handles null/invalid JSON content
+
+## Deployment Modes (6 Options)
 1. **CLI Dry-run (default)**: `docker-compose up -d` - Safe monitoring only
 2. **CLI Production**: `docker-compose --profile prod up -d` - Auto-updates enabled
-3. **Web UI Only**: `docker-compose --profile webui up -d` - Browser interface (port 5050), dry-run mode
-4. **Web UI + CLI Dry-run**: `docker-compose --profile webui up -d dum dum-webui` - Both services, monitoring only
-5. **Web UI + CLI Production**: `docker-compose --profile webui --profile prod up -d` - Full stack with auto-updates
+3. **Web UI Only (dry-run)**: `docker-compose --profile webui up -d` - Browser interface (port 5050), monitoring only
+4. **Web UI Only (production)**: `docker-compose --profile webui-prod up -d` - Browser interface with auto-updates
+5. **Web UI + CLI Dry-run**: `docker-compose --profile webui up -d dum dum-webui` - Both services, monitoring only
+6. **Web UI + CLI Production**: `docker-compose --profile webui-prod --profile prod up -d` - Full stack with auto-updates
 
 ## Web UI Features
 - **Production-ready**: Gunicorn with eventlet workers, not Flask dev server
@@ -70,7 +79,7 @@ Python-based Docker image auto-updater that tracks version-specific tags matchin
 - **Live regex validation**: Test input field with colored match/no-match feedback
 - **Manual checks**: Trigger update scans on-demand
 - **Daemon control**: Start/stop background checking with configurable intervals
-- **Update history**: Track all checks with timestamps, applied vs dry-run indication
+- **Update history**: Persistent history (survives restarts), tracks all checks with timestamps, applied vs dry-run indication
 - **Activity log**: Real-time log streaming with color-coded severity
 - **REST API**: Full API for integration (`/api/status`, `/api/config`, `/api/check`, `/api/state`, etc.)
 
@@ -84,6 +93,8 @@ Python-based Docker image auto-updater that tracks version-specific tags matchin
 - **Current version detection**: Cross-references container's image ID with local image inventory to find actual version tag (not just Config.Image which shows base tag)
 - **Multi-registry support**: Docker Hub, gcr.io, ghcr.io (GitHub Container Registry uses /token endpoint)
 - **Performance optimizations**:
+  - HEAD requests for manifest digests (no body download, correct multi-arch comparison)
+  - Parallel tag fetching with ThreadPoolExecutor (up to 10 concurrent, early termination on match)
   - Regex patterns compiled once at config load, cached in dictionary
   - Single container inspection call instead of 3+ subprocess invocations
   - Minimal string operations in image reference parsing
@@ -159,9 +170,25 @@ See `nas-setup.md` for Synology/QNAP setup. Standard mounts:
 **Web UI Config Editor (PR #4, squash merge):**
 - fc0197d: Webui config take2 - Card-based GUI config editor, ghcr.io auth fix, improved version detection via image inventory, live regex validation with colored feedback
 
+**State Tab Removal (PR #6):**
+- e3e97c3: Remove unused State tab from Web UI (always showed empty in dry-run mode)
+
+**Image Retention (PR #7):**
+- 84c7fa0: Add configurable `keep_versions` option for image cleanup
+
+**Cleanup & Bug Fixes (cleanup-bugfixes branch):**
+- 367ddaa: Fix WebUI production mode with new `webui-prod` profile
+- 3cc6521: Optimize registry API calls with HEAD requests and parallel fetching
+- 119a9c0: Persist update history to `/config/history.json`
+- 3159aca: Fix socket.emit from background threads
+- d01e89e: Fix NoneType iteration error when registry returns null tags
+- 7e85777: Fix null handling in container config parsing
+- a6bf3b2: Fix history showing 'Applied' for images with auto_update=false
+
 ## Current Branch Status
-- **main**: Production-ready with all features merged - Web UI, code simplification, card-based config editor
-- Feature branches (webui, simplify1, etc.) have been merged via PRs and can be deleted
+- **main**: Production-ready with Web UI, code simplification, card-based config editor
+- **claude/cleanup-bugfixes-1G3hk**: Performance optimizations, persistent history, bug fixes (pending merge)
+- Old feature branches (webui, simplify1, etc.) have been merged via PRs and can be deleted
 
 ## Known Patterns & Anti-Patterns
 **UI State Management:**
@@ -181,6 +208,14 @@ See `nas-setup.md` for Synology/QNAP setup. Standard mounts:
 - ✅ Solution: Cache DOM references at initialization in `dom` object
 - ❌ Anti-pattern: Busy-wait loop with 1-second sleeps for daemon interval
 - ✅ Solution: Use `threading.Event.wait(timeout=interval)` for efficient blocking
+- ❌ Anti-pattern: Sequential GET requests for each tag's manifest
+- ✅ Solution: Parallel HEAD requests with ThreadPoolExecutor, early termination
+
+**API Null Handling:**
+- ❌ Anti-pattern: Using `.get('tags', [])` for registry API responses
+- ✅ Solution: Use `.get('tags') or []` to handle both missing keys AND explicit null values
+- ❌ Anti-pattern: Assuming Docker API arrays are never null
+- ✅ Solution: Use `config.get('CapAdd') or []` pattern for all array fields (Env, Mounts, Devices, etc.)
 
 **Git Workflow:**
 - Systematic fixes: One commit per fix for clear history
@@ -207,3 +242,7 @@ See `nas-setup.md` for Synology/QNAP setup. Standard mounts:
 - [ ] Card-based config editor: expand/collapse, add/edit/delete images
 - [ ] Live regex validation shows colored match/no-match feedback
 - [ ] ghcr.io images authenticate and fetch correctly
+- [ ] Update history persists across WebUI restarts
+- [ ] History correctly shows 'Dry Run' for auto_update=false images
+- [ ] WebUI production mode (webui-prod profile) actually applies updates
+- [ ] keep_versions limits retained images during cleanup
