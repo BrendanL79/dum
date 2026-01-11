@@ -242,11 +242,8 @@ function createImageCard(config, index, isNew = false) {
 
             <div class="form-group">
                 <label>Test Tag</label>
-                <div class="regex-test-row">
-                    <input type="text" class="form-input regex-test-input"
-                           placeholder="e.g., v8.11.1-ls358">
-                    <span class="regex-test-result"></span>
-                </div>
+                <input type="text" class="form-input regex-test-input"
+                       placeholder="e.g., v8.11.1-ls358">
                 <div class="regex-test-hint">Enter a tag to test if it matches the regex pattern</div>
             </div>
 
@@ -397,27 +394,27 @@ function validateRegex(regexInput) {
 function updateRegexTest(card) {
     const regexInput = card.querySelector('input[name="regex"]');
     const testInput = card.querySelector('.regex-test-input');
-    const resultSpan = card.querySelector('.regex-test-result');
+    const hintDiv = card.querySelector('.regex-test-hint');
 
-    // Clear result if no test input
+    // Reset to default hint if no test input
     if (!testInput.value) {
-        resultSpan.className = 'regex-test-result';
-        resultSpan.textContent = '';
+        hintDiv.className = 'regex-test-hint';
+        hintDiv.textContent = 'Enter a tag to test if it matches the regex pattern';
         return;
     }
 
     try {
         const regex = new RegExp(regexInput.value);
         if (regex.test(testInput.value)) {
-            resultSpan.className = 'regex-test-result match';
-            resultSpan.textContent = '\u2713';
+            hintDiv.className = 'regex-test-hint match';
+            hintDiv.textContent = `"${testInput.value}" matches the pattern`;
         } else {
-            resultSpan.className = 'regex-test-result no-match';
-            resultSpan.textContent = '\u2717';
+            hintDiv.className = 'regex-test-hint no-match';
+            hintDiv.textContent = `"${testInput.value}" does not match the pattern`;
         }
     } catch (e) {
-        resultSpan.className = 'regex-test-result';
-        resultSpan.textContent = '';
+        hintDiv.className = 'regex-test-hint';
+        hintDiv.textContent = 'Enter a tag to test if it matches the regex pattern';
     }
 }
 
