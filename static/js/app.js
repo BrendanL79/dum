@@ -215,6 +215,13 @@ function createImageCard(config, index, isNew = false) {
         </div>
         <div class="card-body">
             <div class="form-group">
+                <label>Registry</label>
+                <input type="text" class="form-input" name="registry"
+                       value="${escapeHtml(config.registry || '')}"
+                       placeholder="Docker Hub (default), ghcr.io, gcr.io, etc.">
+            </div>
+
+            <div class="form-group">
                 <label>Image Name <span class="required">*</span></label>
                 <input type="text" class="form-input" name="image"
                        value="${escapeHtml(config.image || '')}"
@@ -255,13 +262,6 @@ function createImageCard(config, index, isNew = false) {
                 <input type="text" class="form-input" name="container_name"
                        value="${escapeHtml(config.container_name || '')}"
                        placeholder="e.g., calibre">
-            </div>
-
-            <div class="form-group">
-                <label>Registry</label>
-                <input type="text" class="form-input" name="registry"
-                       value="${escapeHtml(config.registry || '')}"
-                       placeholder="e.g., gcr.io (optional)">
             </div>
 
             <div class="form-row checkbox-row">
