@@ -18,15 +18,15 @@ Python-based Docker image auto-updater that tracks version-specific tags matchin
 - Architecture-aware via manifest lists
 - State tracking prevents duplicate updates
 - Container recreation preserves ALL settings with rollback on failure
-- **Current version detection**: Inspects running containers to show current vs available versions
+- **Current version detection**: Cross-references container image IDs with local inventory to show current vs available versions
 
 ## Key Files
-- `dum.py`: Main updater logic with DockerImageUpdater class (~880 lines)
+- `dum.py`: Main updater logic with DockerImageUpdater class (~900 lines)
 - `webui.py`: Flask-SocketIO web interface with gunicorn production server (~280 lines)
 - `docker-compose.yml`: Five deployment modes (dry-run, prod, webui, webui+dry-run, webui+prod)
 - `config/config.json`: Image definitions with regex patterns (runtime, gitignored)
 - `state/docker_update_state.json`: Tracks current versions/digests (runtime, gitignored)
-- `static/js/app.js`: WebUI frontend logic with Socket.IO real-time updates (~370 lines)
+- `static/js/app.js`: WebUI frontend with card-based config editor (~790 lines)
 - `templates/index.html`: WebUI dashboard structure
 - `static/css/style.css`: WebUI styling
 - `README.md`: Comprehensive user documentation
@@ -48,12 +48,10 @@ Python-based Docker image auto-updater that tracks version-specific tags matchin
 ```
 
 ## Security & Code Quality Improvements
-- **Security fixes (bb79953)**: Fixed command injection, JSON schema validation, file locking, request timeouts
+- **Security fixes**: Fixed command injection, JSON schema validation, file locking, request timeouts
 - **Exception handling**: Replaced bare `except:` with specific exception types (OSError, IOError, etc.)
 - **Production hardening**: Cross-platform support (Unix fcntl, Windows msvcrt), proper subprocess usage
-- **Code simplification (simplify1 branch)** - Two analysis passes:
-  - **Pass 1**: Regex pattern caching, consolidated container inspection, simplified parsing, removed validation indirection
-  - **Pass 2**: Removed dead code (unused imports, variables, unreachable checks), added `require_updater` decorator, consolidated mount string construction, `threading.Event` for efficient daemon sleep, DOM element caching in JS, optional chaining
+- **Code simplification (PR #2)**: Regex pattern caching, consolidated container inspection, dead code removal, `require_updater` decorator, `threading.Event` for efficient daemon sleep, DOM element caching, optional chaining
 
 ## Deployment Modes (5 Options)
 1. **CLI Dry-run (default)**: `docker-compose up -d` - Safe monitoring only
@@ -62,11 +60,12 @@ Python-based Docker image auto-updater that tracks version-specific tags matchin
 4. **Web UI + CLI Dry-run**: `docker-compose --profile webui up -d dum dum-webui` - Both services, monitoring only
 5. **Web UI + CLI Production**: `docker-compose --profile webui --profile prod up -d` - Full stack with auto-updates
 
-## Web UI Features (Merged to Main)
+## Web UI Features
 - **Production-ready**: Gunicorn with eventlet workers, not Flask dev server
 - **Real-time updates**: Socket.IO WebSocket for live status, check progress, daemon state
 - **Dashboard**: Shows current vs available versions, connection status, mode indicator
-- **Configuration editor**: Edit JSON with syntax validation, auto-reload on save
+- **Configuration editor**: Card-based GUI with form fields, expand/collapse, edit/delete per image
+- **Live regex validation**: Test input field with colored match/no-match feedback
 - **Manual checks**: Trigger update scans on-demand
 - **Daemon control**: Start/stop background checking with configurable intervals
 - **Update history**: Track all checks with timestamps, applied vs dry-run indication
@@ -81,7 +80,8 @@ Python-based Docker image auto-updater that tracks version-specific tags matchin
 - **Rollback on failure**: If container fails to start post-update, reverts to old image automatically
 - **Atomic state writes**: Temp file + rename for crash safety, platform-specific file locking (fcntl/msvcrt)
 - **Dry-run mode**: Logs all operations without executing (default for safety)
-- **Current version detection**: Uses `docker inspect` to extract running container's image tag, validates against regex
+- **Current version detection**: Cross-references container's image ID with local image inventory to find actual version tag (not just Config.Image which shows base tag)
+- **Multi-registry support**: Docker Hub, gcr.io, ghcr.io (GitHub Container Registry uses /token endpoint)
 - **Performance optimizations**:
   - Regex patterns compiled once at config load, cached in dictionary
   - Single container inspection call instead of 3+ subprocess invocations
@@ -146,62 +146,30 @@ See `nas-setup.md` for Synology/QNAP setup. Standard mounts:
 - fe869c9: Set up CLAUDE.md
 - 47f1a10: First pass at dry run mode
 
-**Security & Quality (main branch):**
+**Security & Quality:**
 - bb79953: Fix critical security vulnerabilities and improve code quality
 
-**Web UI Development (webui branch, merged to main):**
-- 94bcd24: Add web UI for Docker updater
-- 7cb1e4f: Update CLAUDE.md with comprehensive project context
-- c939cd0: Rename containers from docker-updater to dum
-- 74a1dcc: Add current version detection from running containers
-- 6c949bc: Replace development server with production-ready gunicorn
-- 35b8f27: Improve UI state communication and daemon visibility
-- 284db92: Merge webui into main (PR #1)
+**Web UI (PR #1):**
+- 284db92: Merge webui branch - Flask-SocketIO interface, gunicorn production server, real-time updates
 
-**Post-merge improvements (main branch):**
-- 30f1c16: Rename containers from docker-updater to dum (main)
-- eafaebb: Add current version detection from running containers (main)
-- 9df7d1f: Complete rewrite of README.md with current features
+**Code Simplification (PR #2, squash merge):**
+- bde2133: code-simplifier (2 passes) - Regex caching, consolidated container inspection, dead code removal, `require_updater` decorator, `threading.Event` for daemon sleep, DOM caching, optional chaining
 
-**Code Simplification (simplify1 branch) - Pass 1:**
-- 5fb75a7: Fix: Move platform detection to module level
-- 2a447c4: Fix: Replace bare exception handlers with specific exceptions
-- 9219b42: Fix: Make Docker socket permissions explicit in production
-- df3fcd8: Fix: Cache compiled regex patterns for performance
-- f0075cb: Fix: Consolidate container inspection calls
-- 637e491: Fix: Simplify image reference parsing logic
-- 9b2cf46: Fix: Simplify redundant state validation
-- c717745: Update CLAUDE.md with comprehensive project context
-
-**Code Simplification (simplify1 branch) - Pass 2:**
-- b3d650b: Fix: Remove unused shlex import
-- 8dc78c7: Fix: Remove dead code duplicate dry_run check
-- 7073161: Fix: Replace unused updater_thread with daemon_thread declaration
-- d92e4a2: Fix: Remove unused status variable from app.js
-- c418f54: Fix: Consolidate duplicated mount string construction
-- f8b02f5: Fix: Add require_updater decorator to reduce code duplication
-- 9f8c428: Fix: Remove unnecessary else block returning None
-- 8f82371: Fix: Use tuple instead of list for prefix iteration
-- 5ee80bf: Fix: Use threading.Event for efficient daemon sleep
-- d6f3bab: Fix: Cache DOM element references for better performance
-- 5d5f422: Fix: Use optional chaining for cleaner null checks
-- c59b134: Fix: Remove unused container_id variable
+**Web UI Config Editor (PR #4, squash merge):**
+- fc0197d: Webui config take2 - Card-based GUI config editor, ghcr.io auth fix, improved version detection via image inventory, live regex validation with colored feedback
 
 ## Current Branch Status
-- **main**: Production-ready with Web UI merged, comprehensive README
-- **webui**: Merged into main (PR #1), can be deleted
-- **simplify1**: Code quality improvements across two analysis passes
-  - 20 commits total (8 from pass 1 + 12 from pass 2)
-  - Pass 1: Performance optimizations (regex caching, reduced subprocess calls), code clarity
-  - Pass 2: Dead code removal, reduced duplication (decorators, consolidated logic), modern JS patterns
-  - Ready to merge after review
+- **main**: Production-ready with all features merged - Web UI, code simplification, card-based config editor
+- Feature branches (webui, simplify1, etc.) have been merged via PRs and can be deleted
 
 ## Known Patterns & Anti-Patterns
 **UI State Management:**
 - ❌ Anti-pattern: Showing "All images are up to date!" before any check performed
 - ✅ Solution: Check if `last_check` exists, show "No check performed yet" if null
 - ❌ Anti-pattern: Displaying version as "unknown" when container is running
-- ✅ Solution: Use `docker inspect` to extract actual running image tag
+- ✅ Solution: Cross-reference container's image ID with local image inventory to find actual version tag
+- ❌ Anti-pattern: Using Config.Image from docker inspect (shows base tag like "latest")
+- ✅ Solution: Match image ID against all local images to find version-specific tag
 
 **Performance:**
 - ❌ Anti-pattern: Compiling regex patterns on every tag match attempt
@@ -235,3 +203,6 @@ See `nas-setup.md` for Synology/QNAP setup. Standard mounts:
 - [ ] Config save triggers updater reload
 - [ ] Socket.IO real-time updates work (status, checks, daemon)
 - [ ] No false "UPDATE AVAILABLE: X -> X" when versions match
+- [ ] Card-based config editor: expand/collapse, add/edit/delete images
+- [ ] Live regex validation shows colored match/no-match feedback
+- [ ] ghcr.io images authenticate and fetch correctly
