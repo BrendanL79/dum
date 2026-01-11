@@ -275,18 +275,21 @@ class DockerImageUpdater:
     def _get_docker_token(self, registry: str, namespace: str, repo: str) -> Optional[str]:
         """
         Get authentication token for Docker registry.
-        
+
         Args:
             registry: Registry hostname
             namespace: Image namespace
             repo: Repository name
-            
+
         Returns:
             Authentication token or None
         """
         # Different auth endpoints for different registries
         if registry == DEFAULT_REGISTRY:
             auth_url = f"{DEFAULT_AUTH_URL}?service=registry.docker.io&scope=repository:{namespace}/{repo}:pull"
+        elif registry == "ghcr.io":
+            # GitHub Container Registry uses /token endpoint
+            auth_url = f"https://ghcr.io/token?service=ghcr.io&scope=repository:{namespace}/{repo}:pull"
         else:
             # Generic registry auth (may need customization)
             auth_url = f"https://{registry}/v2/auth?service={registry}&scope=repository:{namespace}/{repo}:pull"
