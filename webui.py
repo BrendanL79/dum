@@ -94,19 +94,19 @@ def require_updater(f):
 def run_check():
     """Run a single check cycle."""
     global is_checking, last_check_time, last_updates
-    
+
     if is_checking:
         return
-        
+
     is_checking = True
-    socketio.emit('status_update', {'checking': True})
-    
+    socketio.emit('status_update', {'checking': True}, namespace='/')
+
     try:
         if updater:
             updates = updater.check_and_update()
             last_updates = updates
             last_check_time = datetime.now()
-            
+
             # Add to history
             if updates:
                 for update in updates:
@@ -118,14 +118,17 @@ def run_check():
                         'applied': not updater.dry_run
                     })
                 save_history()  # Persist to disk
-                    
+
             socketio.emit('check_complete', {
                 'updates': updates,
                 'timestamp': last_check_time.isoformat()
-            })
+            }, namespace='/')
+    except Exception as e:
+        logger.error(f"Check failed: {e}")
+        socketio.emit('check_error', {'error': str(e)}, namespace='/')
     finally:
         is_checking = False
-        socketio.emit('status_update', {'checking': False})
+        socketio.emit('status_update', {'checking': False}, namespace='/')
 
 
 def daemon_worker():

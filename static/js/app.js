@@ -27,7 +27,11 @@ function initSocket() {
     socket.on('check_complete', (data) => {
         handleCheckComplete(data);
     });
-    
+
+    socket.on('check_error', (data) => {
+        addLog('Check failed: ' + data.error, 'error');
+    });
+
     socket.on('connected', (data) => {
         addLog('Connected: ' + data.status, 'info');
     });
