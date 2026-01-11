@@ -1,6 +1,7 @@
 // Global state
 let socket;
 let isDaemonRunning = false;
+let imageConfigs = [];  // Array of image config objects
 
 // Cached DOM elements (initialized in DOMContentLoaded)
 const dom = {};
@@ -163,38 +164,453 @@ function displayNoUpdates() {
     dom.updateList.innerHTML = '<p class="no-updates">All images are up to date!</p>';
 }
 
-// Load configuration
+// Load configuration and render cards
 async function loadConfig() {
     try {
         const response = await fetch('/api/config');
         const config = await response.json();
-        dom.configJson.value = JSON.stringify(config, null, 2);
+        imageConfigs = config.images || [];
+        renderImageCards();
     } catch (error) {
         addLog('Failed to load config: ' + error, 'error');
     }
 }
 
+// Render all image cards
+function renderImageCards() {
+    dom.imageCards.innerHTML = '';
+    imageConfigs.forEach((config, index) => {
+        const card = createImageCard(config, index);
+        dom.imageCards.appendChild(card);
+    });
+}
+
+// Create a single image card
+function createImageCard(config, index, isNew = false) {
+    const card = document.createElement('div');
+    card.className = 'image-card' + (isNew ? ' is-new' : '');
+    card.dataset.index = index;
+
+    // Build badges HTML
+    let badges = '';
+    if (config.auto_update) {
+        badges += '<span class="badge badge-auto-update">Auto-update</span>';
+    }
+    if (config.base_tag && config.base_tag !== 'latest') {
+        badges += `<span class="badge badge-base-tag">${escapeHtml(config.base_tag)}</span>`;
+    }
+
+    card.innerHTML = `
+        <div class="card-header">
+            <div class="card-title">
+                <span class="card-image-name">${escapeHtml(config.image || 'New Image')}</span>
+                <span class="card-status-badges">${badges}</span>
+            </div>
+            <div class="card-actions">
+                <button class="btn-icon btn-expand" title="Expand/Collapse">
+                    <span class="expand-icon">&#9660;</span>
+                </button>
+                <button class="btn-icon btn-delete" title="Delete Image">&#10005;</button>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="form-group">
+                <label>Registry</label>
+                <input type="text" class="form-input" name="registry"
+                       value="${escapeHtml(config.registry || '')}"
+                       placeholder="Docker Hub (default), ghcr.io, gcr.io, etc.">
+            </div>
+
+            <div class="form-group">
+                <label>Image Name <span class="required">*</span></label>
+                <input type="text" class="form-input" name="image"
+                       value="${escapeHtml(config.image || '')}"
+                       placeholder="e.g., linuxserver/calibre">
+                <div class="field-error"></div>
+            </div>
+
+            <div class="form-group">
+                <label>Regex Pattern <span class="required">*</span></label>
+                <input type="text" class="form-input" name="regex"
+                       value="${escapeHtml(config.regex || '')}"
+                       placeholder="e.g., ^v[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+$">
+                <div class="regex-validation">
+                    <span class="regex-status"></span>
+                </div>
+                <div class="field-error"></div>
+            </div>
+
+            <div class="form-group">
+                <label>Test Tag</label>
+                <input type="text" class="form-input regex-test-input"
+                       placeholder="e.g., v8.11.1-ls358">
+                <div class="regex-test-hint">Enter a tag to test if it matches the regex pattern</div>
+            </div>
+
+            <div class="form-group">
+                <label>Base Tag</label>
+                <input type="text" class="form-input" name="base_tag"
+                       value="${escapeHtml(config.base_tag || '')}"
+                       placeholder="latest (default)">
+            </div>
+
+            <div class="form-group">
+                <label>Container Name</label>
+                <input type="text" class="form-input" name="container_name"
+                       value="${escapeHtml(config.container_name || '')}"
+                       placeholder="e.g., calibre">
+            </div>
+
+            <div class="form-row checkbox-row">
+                <label class="checkbox-label">
+                    <input type="checkbox" name="auto_update" ${config.auto_update ? 'checked' : ''}>
+                    <span>Auto-update enabled</span>
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" name="cleanup_old_images" ${config.cleanup_old_images ? 'checked' : ''}>
+                    <span>Cleanup old images</span>
+                </label>
+            </div>
+        </div>
+    `;
+
+    // Attach event listeners
+    attachCardEventListeners(card, index);
+
+    // Validate regex on initial load
+    const regexInput = card.querySelector('input[name="regex"]');
+    if (regexInput.value) {
+        validateRegex(regexInput);
+    }
+
+    // If new card, expand it
+    if (isNew) {
+        card.querySelector('.card-header').classList.add('expanded');
+        card.querySelector('.card-body').classList.add('expanded');
+    }
+
+    return card;
+}
+
+// Escape HTML to prevent XSS
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Attach event listeners to a card
+function attachCardEventListeners(card, index) {
+    const header = card.querySelector('.card-header');
+    const deleteBtn = card.querySelector('.btn-delete');
+    const imageInput = card.querySelector('input[name="image"]');
+    const regexInput = card.querySelector('input[name="regex"]');
+    const testInput = card.querySelector('.regex-test-input');
+    const autoUpdateCheckbox = card.querySelector('input[name="auto_update"]');
+    const baseTagInput = card.querySelector('input[name="base_tag"]');
+
+    // Toggle expand/collapse
+    header.addEventListener('click', (e) => {
+        if (e.target.closest('.btn-delete')) return;
+        toggleCardExpand(card);
+    });
+
+    // Delete button
+    deleteBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        showDeleteConfirmation(index);
+    });
+
+    // Update card title when image name changes
+    imageInput.addEventListener('input', () => {
+        const nameSpan = card.querySelector('.card-image-name');
+        nameSpan.textContent = imageInput.value || 'New Image';
+    });
+
+    // Validate regex pattern
+    regexInput.addEventListener('input', () => {
+        validateRegex(regexInput);
+        updateRegexTest(card);
+    });
+
+    // Test regex against input
+    testInput.addEventListener('input', () => {
+        updateRegexTest(card);
+    });
+
+    // Update badges when auto_update or base_tag changes
+    autoUpdateCheckbox.addEventListener('change', () => {
+        updateCardBadges(card);
+    });
+    baseTagInput.addEventListener('input', () => {
+        updateCardBadges(card);
+    });
+}
+
+// Toggle card expand/collapse state
+function toggleCardExpand(card) {
+    const header = card.querySelector('.card-header');
+    const body = card.querySelector('.card-body');
+    const isExpanded = header.classList.contains('expanded');
+
+    if (isExpanded) {
+        header.classList.remove('expanded');
+        body.classList.remove('expanded');
+    } else {
+        header.classList.add('expanded');
+        body.classList.add('expanded');
+    }
+}
+
+// Validate regex pattern
+function validateRegex(regexInput) {
+    const card = regexInput.closest('.image-card');
+    const statusSpan = card.querySelector('.regex-status');
+
+    if (!regexInput.value) {
+        statusSpan.className = 'regex-status';
+        statusSpan.textContent = '';
+        regexInput.classList.remove('invalid', 'valid');
+        return true;
+    }
+
+    try {
+        new RegExp(regexInput.value);
+        statusSpan.className = 'regex-status valid';
+        statusSpan.textContent = 'Valid regex pattern';
+        regexInput.classList.remove('invalid');
+        regexInput.classList.add('valid');
+        return true;
+    } catch (e) {
+        statusSpan.className = 'regex-status invalid';
+        statusSpan.textContent = 'Invalid regex pattern: ' + e.message;
+        regexInput.classList.remove('valid');
+        regexInput.classList.add('invalid');
+        return false;
+    }
+}
+
+// Update regex test result
+function updateRegexTest(card) {
+    const regexInput = card.querySelector('input[name="regex"]');
+    const testInput = card.querySelector('.regex-test-input');
+    const hintDiv = card.querySelector('.regex-test-hint');
+
+    // Reset to default hint if no test input
+    if (!testInput.value) {
+        hintDiv.className = 'regex-test-hint';
+        hintDiv.textContent = 'Enter a tag to test if it matches the regex pattern';
+        return;
+    }
+
+    // Show error if test input but no meaningful regex pattern
+    const pattern = regexInput.value.trim();
+    if (!pattern || pattern === '^') {
+        hintDiv.className = 'regex-test-hint no-match';
+        hintDiv.textContent = 'Enter a regex pattern first';
+        return;
+    }
+
+    try {
+        const regex = new RegExp(pattern);
+        if (regex.test(testInput.value)) {
+            hintDiv.className = 'regex-test-hint match';
+            hintDiv.textContent = `"${testInput.value}" matches the pattern`;
+        } else {
+            hintDiv.className = 'regex-test-hint no-match';
+            hintDiv.textContent = `"${testInput.value}" does not match the pattern`;
+        }
+    } catch (e) {
+        hintDiv.className = 'regex-test-hint';
+        hintDiv.textContent = 'Enter a tag to test if it matches the regex pattern';
+    }
+}
+
+// Update card badges based on current values
+function updateCardBadges(card) {
+    const badgesSpan = card.querySelector('.card-status-badges');
+    const autoUpdate = card.querySelector('input[name="auto_update"]').checked;
+    const baseTag = card.querySelector('input[name="base_tag"]').value;
+
+    let badges = '';
+    if (autoUpdate) {
+        badges += '<span class="badge badge-auto-update">Auto-update</span>';
+    }
+    if (baseTag && baseTag !== 'latest') {
+        badges += `<span class="badge badge-base-tag">${escapeHtml(baseTag)}</span>`;
+    }
+    badgesSpan.innerHTML = badges;
+}
+
+// Add new image
+function addNewImage() {
+    const newConfig = {
+        image: '',
+        regex: '',
+        base_tag: '',
+        auto_update: false,
+        container_name: '',
+        cleanup_old_images: false,
+        registry: ''
+    };
+
+    imageConfigs.push(newConfig);
+    const card = createImageCard(newConfig, imageConfigs.length - 1, true);
+    dom.imageCards.appendChild(card);
+
+    // Scroll to new card and focus image input
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setTimeout(() => {
+        card.querySelector('input[name="image"]').focus();
+    }, 100);
+}
+
+// Show delete confirmation modal
+function showDeleteConfirmation(index) {
+    const imageName = imageConfigs[index]?.image || 'this image';
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+        <div class="modal-content">
+            <div class="modal-title">Delete Image Configuration</div>
+            <div class="modal-body">
+                Are you sure you want to delete the configuration for <strong>${escapeHtml(imageName)}</strong>?
+                This action cannot be undone until you save.
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary modal-cancel">Cancel</button>
+                <button class="btn btn-danger modal-confirm">Delete</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    overlay.querySelector('.modal-cancel').addEventListener('click', () => {
+        overlay.remove();
+    });
+
+    overlay.querySelector('.modal-confirm').addEventListener('click', () => {
+        deleteImage(index);
+        overlay.remove();
+    });
+
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) {
+            overlay.remove();
+        }
+    });
+}
+
+// Delete image from list
+function deleteImage(index) {
+    imageConfigs.splice(index, 1);
+    renderImageCards();
+    addLog('Image removed (save to apply changes)', 'warning');
+}
+
+// Collect form data from all cards
+function collectFormData() {
+    const configs = [];
+    const cards = dom.imageCards.querySelectorAll('.image-card');
+    let hasErrors = false;
+
+    cards.forEach((card) => {
+        const imageInput = card.querySelector('input[name="image"]');
+        const regexInput = card.querySelector('input[name="regex"]');
+
+        // Clear previous errors
+        card.querySelectorAll('.field-error').forEach(el => el.textContent = '');
+        card.classList.remove('has-error');
+
+        // Validate required fields
+        let cardHasError = false;
+
+        if (!imageInput.value.trim()) {
+            imageInput.nextElementSibling.textContent = 'Image name is required';
+            imageInput.classList.add('invalid');
+            cardHasError = true;
+        } else {
+            imageInput.classList.remove('invalid');
+        }
+
+        if (!regexInput.value.trim()) {
+            const errorDiv = regexInput.closest('.form-group').querySelector('.field-error');
+            errorDiv.textContent = 'Regex pattern is required';
+            regexInput.classList.add('invalid');
+            cardHasError = true;
+        } else if (!validateRegex(regexInput)) {
+            const errorDiv = regexInput.closest('.form-group').querySelector('.field-error');
+            errorDiv.textContent = 'Invalid regex pattern';
+            cardHasError = true;
+        }
+
+        if (cardHasError) {
+            card.classList.add('has-error');
+            // Expand card to show errors
+            card.querySelector('.card-header').classList.add('expanded');
+            card.querySelector('.card-body').classList.add('expanded');
+            hasErrors = true;
+        }
+
+        // Build config object
+        const config = {
+            image: imageInput.value.trim(),
+            regex: regexInput.value.trim()
+        };
+
+        // Add optional fields only if they have values
+        const baseTag = card.querySelector('input[name="base_tag"]').value.trim();
+        const containerName = card.querySelector('input[name="container_name"]').value.trim();
+        const registry = card.querySelector('input[name="registry"]').value.trim();
+        const autoUpdate = card.querySelector('input[name="auto_update"]').checked;
+        const cleanup = card.querySelector('input[name="cleanup_old_images"]').checked;
+
+        if (baseTag) config.base_tag = baseTag;
+        if (containerName) config.container_name = containerName;
+        if (registry) config.registry = registry;
+        if (autoUpdate) config.auto_update = true;
+        if (cleanup) config.cleanup_old_images = true;
+
+        configs.push(config);
+    });
+
+    return hasErrors ? null : configs;
+}
+
 // Save configuration
 async function saveConfig() {
-    try {
-        const configText = dom.configJson.value;
-        const config = JSON.parse(configText);
+    const configs = collectFormData();
 
+    if (!configs) {
+        addLog('Please fix validation errors before saving', 'error');
+        return;
+    }
+
+    try {
         const response = await fetch('/api/config', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(config)
+            body: JSON.stringify({ images: configs })
         });
 
         if (response.ok) {
             addLog('Configuration saved successfully', 'info');
+            imageConfigs = configs;
+
+            // Remove "is-new" class from all cards
+            dom.imageCards.querySelectorAll('.image-card.is-new').forEach(card => {
+                card.classList.remove('is-new');
+            });
+
             loadStatus();
         } else {
             const error = await response.json();
             addLog('Failed to save config: ' + error.error, 'error');
         }
     } catch (error) {
-        addLog('Invalid JSON: ' + error, 'error');
+        addLog('Error saving configuration: ' + error, 'error');
     }
 }
 
@@ -347,7 +763,9 @@ document.addEventListener('DOMContentLoaded', () => {
     dom.daemonStatusText = document.getElementById('daemon-status-text');
     dom.lastCheck = document.getElementById('last-check');
     dom.modeIndicator = document.getElementById('mode-indicator');
-    dom.configJson = document.getElementById('config-json');
+    dom.imageCards = document.getElementById('image-cards');
+    dom.addImageBtn = document.getElementById('add-image');
+    dom.saveConfigBtn = document.getElementById('save-config');
     dom.stateView = document.getElementById('state-view');
     dom.historyList = document.getElementById('history-list');
     dom.daemonInterval = document.getElementById('daemon-interval');
@@ -358,7 +776,8 @@ document.addEventListener('DOMContentLoaded', () => {
     dom.checkNow.addEventListener('click', checkNow);
     dom.toggleDaemon.addEventListener('click', toggleDaemon);
     document.getElementById('refresh-config').addEventListener('click', loadConfig);
-    document.getElementById('save-config').addEventListener('click', saveConfig);
+    dom.saveConfigBtn.addEventListener('click', saveConfig);
+    dom.addImageBtn.addEventListener('click', addNewImage);
 
     // Tab switching
     document.querySelectorAll('.tab-button').forEach(btn => {

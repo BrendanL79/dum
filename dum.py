@@ -275,18 +275,21 @@ class DockerImageUpdater:
     def _get_docker_token(self, registry: str, namespace: str, repo: str) -> Optional[str]:
         """
         Get authentication token for Docker registry.
-        
+
         Args:
             registry: Registry hostname
             namespace: Image namespace
             repo: Repository name
-            
+
         Returns:
             Authentication token or None
         """
         # Different auth endpoints for different registries
         if registry == DEFAULT_REGISTRY:
             auth_url = f"{DEFAULT_AUTH_URL}?service=registry.docker.io&scope=repository:{namespace}/{repo}:pull"
+        elif registry == "ghcr.io":
+            # GitHub Container Registry uses /token endpoint
+            auth_url = f"https://ghcr.io/token?service=ghcr.io&scope=repository:{namespace}/{repo}:pull"
         else:
             # Generic registry auth (may need customization)
             auth_url = f"https://{registry}/v2/auth?service={registry}&scope=repository:{namespace}/{repo}:pull"
@@ -479,36 +482,51 @@ class DockerImageUpdater:
             return None
 
     def _get_container_current_tag(self, container_name: str, image: str, regex: str) -> Optional[str]:
-        """Get the current version tag of a running container."""
+        """Get the current version tag of a running container by checking image inventory."""
         try:
             container_info = self._get_container_config(container_name)
             if not container_info:
                 self.logger.debug(f"Container {container_name} not found or no config")
                 return None
 
-            # Get the image reference from the container config
-            image_ref = container_info.get('Config', {}).get('Image', '')
-            if not image_ref:
-                self.logger.debug(f"No image reference found for container {container_name}")
+            # Get the image ID (sha256) from the container
+            image_id = container_info.get('Image', '')
+            if not image_id:
+                self.logger.debug(f"No image ID found for container {container_name}")
                 return None
 
-            # Extract tag from image reference
-            if ':' in image_ref and image_ref.startswith(image):
-                tag = image_ref.split(':', 1)[1]
+            # Get cached compiled pattern
+            pattern = self.compiled_patterns.get(regex)
+            if not pattern:
+                self.logger.debug(f"Pattern not found in cache: '{regex}'")
+                return None
 
-                # Get cached compiled pattern
-                pattern = self.compiled_patterns.get(regex)
-                if not pattern:
-                    self.logger.debug(f"Pattern not found in cache: '{regex}'")
-                    return None
+            # Query docker images to find all tags for this image name
+            result = subprocess.run(
+                ['docker', 'images', image, '--format', '{{.Tag}} {{.ID}}'],
+                capture_output=True,
+                text=True
+            )
 
-                # Check if tag matches the regex pattern
-                if pattern.match(tag):
-                    self.logger.debug(f"Found matching tag for {container_name}: {tag}")
-                    return tag
+            if result.returncode != 0:
+                self.logger.debug(f"Failed to get image tags for {image}")
+                return None
 
-                self.logger.debug(f"Tag {tag} doesn't match pattern for {container_name}")
+            # Extract short ID from container's image (first 12 chars after sha256:)
+            short_id = image_id.replace('sha256:', '')[:12]
 
+            # Find tags that match both the image ID and regex pattern
+            for line in result.stdout.strip().split('\n'):
+                if not line:
+                    continue
+                parts = line.split()
+                if len(parts) >= 2:
+                    tag, tag_id = parts[0], parts[1]
+                    if tag_id == short_id and pattern.match(tag):
+                        self.logger.debug(f"Found matching tag for {container_name}: {tag}")
+                        return tag
+
+            self.logger.debug(f"No matching tag found in image inventory for {container_name}")
             return None
         except Exception as e:
             self.logger.debug(f"Could not get current tag for {container_name}: {e}")

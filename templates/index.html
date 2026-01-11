@@ -51,8 +51,13 @@
             <div id="config" class="tab-pane">
                 <h2>Configuration</h2>
                 <div id="config-editor">
-                    <textarea id="config-json" class="json-editor"></textarea>
-                    <button id="save-config" class="btn btn-primary">Save Configuration</button>
+                    <div class="config-toolbar">
+                        <button id="add-image" class="btn btn-primary">+ Add Image</button>
+                        <button id="save-config" class="btn btn-success">Save Configuration</button>
+                    </div>
+                    <div id="image-cards" class="image-cards-container">
+                        <!-- Cards dynamically inserted by JavaScript -->
+                    </div>
                 </div>
             </div>
 
