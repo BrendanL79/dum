@@ -538,9 +538,6 @@ class DockerImageUpdater:
             return False
             
         try:
-            # Save container ID for cleanup
-            container_id = container_info['Id']
-            
             # Build docker run command preserving all settings
             run_cmd = self._build_run_command(container_name, full_image, container_info)
 
