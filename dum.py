@@ -506,9 +506,8 @@ class DockerImageUpdater:
                 if pattern.match(tag):
                     self.logger.debug(f"Found matching tag for {container_name}: {tag}")
                     return tag
-                else:
-                    self.logger.debug(f"Tag {tag} doesn't match pattern for {container_name}")
-                    return None
+
+                self.logger.debug(f"Tag {tag} doesn't match pattern for {container_name}")
 
             return None
         except Exception as e:
