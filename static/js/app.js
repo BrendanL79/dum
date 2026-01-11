@@ -2,6 +2,9 @@
 let socket;
 let isDaemonRunning = false;
 
+// Cached DOM elements (initialized in DOMContentLoaded)
+const dom = {};
+
 // Initialize Socket.IO connection
 function initSocket() {
     socket = io();
@@ -31,39 +34,34 @@ function initSocket() {
 
 // Update connection status indicator
 function updateConnectionStatus(connected) {
-    const dot = document.getElementById('status-indicator');
-    const text = document.getElementById('status-text');
-    
     if (connected) {
-        dot.classList.add('connected');
-        text.textContent = 'Connected';
+        dom.statusIndicator.classList.add('connected');
+        dom.statusText.textContent = 'Connected';
         loadStatus();
     } else {
-        dot.classList.remove('connected');
-        dot.classList.remove('checking');
-        text.textContent = 'Disconnected';
+        dom.statusIndicator.classList.remove('connected');
+        dom.statusIndicator.classList.remove('checking');
+        dom.statusText.textContent = 'Disconnected';
     }
 }
 
 // Update status from server
 function updateStatus(data) {
-    const dot = document.getElementById('status-indicator');
-    
     if (data.checking) {
-        dot.classList.add('checking');
-        document.getElementById('status-text').textContent = 'Checking...';
-        document.getElementById('check-now').disabled = true;
+        dom.statusIndicator.classList.add('checking');
+        dom.statusText.textContent = 'Checking...';
+        dom.checkNow.disabled = true;
     } else {
-        dot.classList.remove('checking');
-        document.getElementById('status-text').textContent = 'Connected';
-        document.getElementById('check-now').disabled = false;
+        dom.statusIndicator.classList.remove('checking');
+        dom.statusText.textContent = 'Connected';
+        dom.checkNow.disabled = false;
     }
-    
+
     if (data.daemon_running !== undefined) {
         isDaemonRunning = data.daemon_running;
         updateDaemonButton();
     }
-    
+
     if (data.last_check) {
         updateLastCheck(data.last_check);
     }
@@ -74,30 +72,29 @@ async function loadStatus() {
     try {
         const response = await fetch('/api/status');
         const data = await response.json();
-        
+
         // Update mode indicator
-        const modeIndicator = document.getElementById('mode-indicator');
         if (data.dry_run) {
-            modeIndicator.textContent = 'DRY RUN MODE';
-            modeIndicator.className = 'mode dry-run';
+            dom.modeIndicator.textContent = 'DRY RUN MODE';
+            dom.modeIndicator.className = 'mode dry-run';
         } else {
-            modeIndicator.textContent = 'PRODUCTION MODE';
-            modeIndicator.className = 'mode production';
+            dom.modeIndicator.textContent = 'PRODUCTION MODE';
+            dom.modeIndicator.className = 'mode production';
         }
-        
+
         isDaemonRunning = data.daemon_running;
         updateDaemonButton();
-        
+
         if (data.last_check) {
             updateLastCheck(data.last_check);
         }
-        
+
         // Load other data
         loadConfig();
         loadState();
         loadHistory();
         loadUpdates();
-        
+
     } catch (error) {
         addLog('Failed to load status: ' + error, 'error');
     }
@@ -105,29 +102,24 @@ async function loadStatus() {
 
 // Update last check time
 function updateLastCheck(timestamp) {
-    const elem = document.getElementById('last-check');
     const date = new Date(timestamp);
-    elem.textContent = 'Last check: ' + date.toLocaleString();
+    dom.lastCheck.textContent = 'Last check: ' + date.toLocaleString();
 }
 
 // Update daemon button state
 function updateDaemonButton() {
-    const btn = document.getElementById('toggle-daemon');
-    const indicator = document.getElementById('daemon-indicator');
-    const statusText = document.getElementById('daemon-status-text');
-
     if (isDaemonRunning) {
-        btn.textContent = 'Stop Daemon';
-        btn.classList.add('btn-danger');
-        btn.classList.remove('btn-secondary');
-        indicator.classList.add('connected');
-        statusText.textContent = 'Daemon: Running';
+        dom.toggleDaemon.textContent = 'Stop Daemon';
+        dom.toggleDaemon.classList.add('btn-danger');
+        dom.toggleDaemon.classList.remove('btn-secondary');
+        dom.daemonIndicator.classList.add('connected');
+        dom.daemonStatusText.textContent = 'Daemon: Running';
     } else {
-        btn.textContent = 'Start Daemon';
-        btn.classList.remove('btn-danger');
-        btn.classList.add('btn-secondary');
-        indicator.classList.remove('connected');
-        statusText.textContent = 'Daemon: Stopped';
+        dom.toggleDaemon.textContent = 'Start Daemon';
+        dom.toggleDaemon.classList.remove('btn-danger');
+        dom.toggleDaemon.classList.add('btn-secondary');
+        dom.daemonIndicator.classList.remove('connected');
+        dom.daemonStatusText.textContent = 'Daemon: Stopped';
     }
 }
 
@@ -149,9 +141,8 @@ function handleCheckComplete(data) {
 
 // Display available updates
 function displayUpdates(updates) {
-    const container = document.getElementById('update-list');
-    container.innerHTML = '';
-    
+    dom.updateList.innerHTML = '';
+
     updates.forEach(update => {
         const item = document.createElement('div');
         item.className = 'update-item';
@@ -163,14 +154,13 @@ function displayUpdates(updates) {
                 <span>Digest: ${update.digest.substring(0, 12)}...</span>
             </div>
         `;
-        container.appendChild(item);
+        dom.updateList.appendChild(item);
     });
 }
 
 // Display no updates message
 function displayNoUpdates() {
-    document.getElementById('update-list').innerHTML = 
-        '<p class="no-updates">All images are up to date!</p>';
+    dom.updateList.innerHTML = '<p class="no-updates">All images are up to date!</p>';
 }
 
 // Load configuration
@@ -178,7 +168,7 @@ async function loadConfig() {
     try {
         const response = await fetch('/api/config');
         const config = await response.json();
-        document.getElementById('config-json').value = JSON.stringify(config, null, 2);
+        dom.configJson.value = JSON.stringify(config, null, 2);
     } catch (error) {
         addLog('Failed to load config: ' + error, 'error');
     }
@@ -187,15 +177,15 @@ async function loadConfig() {
 // Save configuration
 async function saveConfig() {
     try {
-        const configText = document.getElementById('config-json').value;
+        const configText = dom.configJson.value;
         const config = JSON.parse(configText);
-        
+
         const response = await fetch('/api/config', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(config)
         });
-        
+
         if (response.ok) {
             addLog('Configuration saved successfully', 'info');
             loadStatus();
@@ -213,7 +203,7 @@ async function loadState() {
     try {
         const response = await fetch('/api/state');
         const state = await response.json();
-        document.getElementById('state-view').textContent = JSON.stringify(state, null, 2);
+        dom.stateView.textContent = JSON.stringify(state, null, 2);
     } catch (error) {
         addLog('Failed to load state: ' + error, 'error');
     }
@@ -224,14 +214,13 @@ async function loadHistory() {
     try {
         const response = await fetch('/api/history');
         const history = await response.json();
-        
-        const container = document.getElementById('history-list');
+
         if (history.length === 0) {
-            container.innerHTML = '<p class="no-updates">No update history yet.</p>';
+            dom.historyList.innerHTML = '<p class="no-updates">No update history yet.</p>';
             return;
         }
-        
-        container.innerHTML = '';
+
+        dom.historyList.innerHTML = '';
         history.reverse().forEach(item => {
             const elem = document.createElement('div');
             elem.className = 'history-item';
@@ -242,7 +231,7 @@ async function loadHistory() {
                 <span class="tag-change">${item.old_tag} → ${item.new_tag}</span>
                 <span>${item.applied ? '✅ Applied' : '⚠️ Dry run'}</span>
             `;
-            container.appendChild(elem);
+            dom.historyList.appendChild(elem);
         });
     } catch (error) {
         addLog('Failed to load history: ' + error, 'error');
@@ -262,7 +251,7 @@ async function loadUpdates() {
             displayNoUpdates();
         } else {
             // No check has been performed yet
-            document.getElementById('update-list').innerHTML =
+            dom.updateList.innerHTML =
                 '<p class="no-updates">No check performed yet. Click "Check Now" to scan for updates.</p>';
         }
     } catch (error) {
@@ -289,14 +278,14 @@ async function checkNow() {
 async function toggleDaemon() {
     try {
         const action = isDaemonRunning ? 'stop' : 'start';
-        const interval = document.getElementById('daemon-interval').value;
-        
+        const interval = dom.daemonInterval.value;
+
         const response = await fetch('/api/daemon', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action, interval: parseInt(interval) })
         });
-        
+
         if (response.ok) {
             const result = await response.json();
             addLog(`Daemon ${result.status}`, 'info');
@@ -313,17 +302,16 @@ async function toggleDaemon() {
 
 // Add log entry
 function addLog(message, level = 'info') {
-    const logOutput = document.getElementById('log-output');
     const entry = document.createElement('div');
     entry.className = `log-line ${level}`;
     const timestamp = new Date().toLocaleTimeString();
     entry.textContent = `[${timestamp}] ${message}`;
-    logOutput.appendChild(entry);
-    logOutput.scrollTop = logOutput.scrollHeight;
-    
+    dom.logOutput.appendChild(entry);
+    dom.logOutput.scrollTop = dom.logOutput.scrollHeight;
+
     // Keep only last 100 lines
-    while (logOutput.children.length > 100) {
-        logOutput.removeChild(logOutput.firstChild);
+    while (dom.logOutput.children.length > 100) {
+        dom.logOutput.removeChild(dom.logOutput.firstChild);
     }
 }
 
@@ -348,18 +336,34 @@ function switchTab(tabName) {
 
 // Initialize everything when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
+    // Cache frequently accessed DOM elements
+    dom.statusIndicator = document.getElementById('status-indicator');
+    dom.statusText = document.getElementById('status-text');
+    dom.checkNow = document.getElementById('check-now');
+    dom.updateList = document.getElementById('update-list');
+    dom.logOutput = document.getElementById('log-output');
+    dom.toggleDaemon = document.getElementById('toggle-daemon');
+    dom.daemonIndicator = document.getElementById('daemon-indicator');
+    dom.daemonStatusText = document.getElementById('daemon-status-text');
+    dom.lastCheck = document.getElementById('last-check');
+    dom.modeIndicator = document.getElementById('mode-indicator');
+    dom.configJson = document.getElementById('config-json');
+    dom.stateView = document.getElementById('state-view');
+    dom.historyList = document.getElementById('history-list');
+    dom.daemonInterval = document.getElementById('daemon-interval');
+
     initSocket();
-    
+
     // Event listeners
-    document.getElementById('check-now').addEventListener('click', checkNow);
-    document.getElementById('toggle-daemon').addEventListener('click', toggleDaemon);
+    dom.checkNow.addEventListener('click', checkNow);
+    dom.toggleDaemon.addEventListener('click', toggleDaemon);
     document.getElementById('refresh-config').addEventListener('click', loadConfig);
     document.getElementById('save-config').addEventListener('click', saveConfig);
-    
+
     // Tab switching
     document.querySelectorAll('.tab-button').forEach(btn => {
         btn.addEventListener('click', () => switchTab(btn.dataset.tab));
     });
-    
+
     addLog('Web UI initialized', 'info');
 });
