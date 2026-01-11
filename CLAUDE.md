@@ -70,8 +70,7 @@ Python-based Docker image auto-updater that tracks version-specific tags matchin
 - **Daemon control**: Start/stop background checking with configurable intervals
 - **Update history**: Track all checks with timestamps, applied vs dry-run indication
 - **Activity log**: Real-time log streaming with color-coded severity
-- **REST API**: Full API for integration (`/api/status`, `/api/config`, `/api/check`, etc.)
-- **State display**: View tracked digests and last update timestamps
+- **REST API**: Full API for integration (`/api/status`, `/api/config`, `/api/check`, `/api/state`, etc.)
 
 ## Critical Implementation Details
 - **Docker API**: Direct HTTP requests to Docker socket for registry operations (manifest fetches)

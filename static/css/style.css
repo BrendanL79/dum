@@ -248,16 +248,6 @@ h1 {
     resize: vertical;
 }
 
-.state-view {
-    font-family: monospace;
-    font-size: 14px;
-    white-space: pre-wrap;
-    background: var(--background);
-    padding: 15px;
-    border-radius: 4px;
-    overflow-x: auto;
-}
-
 .history-list {
     display: grid;
     gap: 8px;

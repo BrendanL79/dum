@@ -92,7 +92,6 @@ async function loadStatus() {
 
         // Load other data
         loadConfig();
-        loadState();
         loadHistory();
         loadUpdates();
 
@@ -614,17 +613,6 @@ async function saveConfig() {
     }
 }
 
-// Load current state
-async function loadState() {
-    try {
-        const response = await fetch('/api/state');
-        const state = await response.json();
-        dom.stateView.textContent = JSON.stringify(state, null, 2);
-    } catch (error) {
-        addLog('Failed to load state: ' + error, 'error');
-    }
-}
-
 // Load update history
 async function loadHistory() {
     try {
@@ -766,7 +754,6 @@ document.addEventListener('DOMContentLoaded', () => {
     dom.imageCards = document.getElementById('image-cards');
     dom.addImageBtn = document.getElementById('add-image');
     dom.saveConfigBtn = document.getElementById('save-config');
-    dom.stateView = document.getElementById('state-view');
     dom.historyList = document.getElementById('history-list');
     dom.daemonInterval = document.getElementById('daemon-interval');
 
