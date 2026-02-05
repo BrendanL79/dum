@@ -1,3 +1,26 @@
+// Image presets derived from known Docker images and their tag patterns
+const IMAGE_PRESETS = [
+    { image: 'budibase/budibase', regex: '^[0-9]+\\.[0-9]+\\.[0-9]+$', example: '3.20.12' },
+    { image: 'crazymax/diun', regex: '^[0-9]+\\.[0-9]+\\.[0-9]+$', example: '4.30.0' },
+    { image: 'homarr-labs/homarr', regex: '^v[0-9]+\\.[0-9]+\\.[0-9]+$', registry: 'ghcr.io', example: 'v1.46.0' },
+    { image: 'mealie-recipes/mealie', regex: '^v[0-9]+\\.[0-9]+\\.[0-9]+$', registry: 'ghcr.io', example: 'v2.5.0' },
+    { image: 'jellyfin/jellyfin', regex: '^[0-9]+\\.[0-9]+\\.[0-9]+$', example: '10.11.4' },
+    { image: 'linuxserver/bazarr', regex: '^v[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+$', example: 'v1.5.3-ls328' },
+    { image: 'linuxserver/calibre', regex: '^v[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+$', example: 'v8.16.2-ls374' },
+    { image: 'linuxserver/calibre-web', regex: '^[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+$', example: '0.6.25-ls348' },
+    { image: 'linuxserver/lidarr', regex: '^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+$', example: '2.8.2.4493-ls22' },
+    { image: 'linuxserver/prowlarr', regex: '^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+$', example: '2.3.0.5236-ls134' },
+    { image: 'linuxserver/qbittorrent', regex: '^[0-9]+\\.[0-9]+\\.[0-9]+-r[0-9]+-ls[0-9]+$', example: '5.1.2-r1-ls411' },
+    { image: 'linuxserver/radarr', regex: '^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+$', example: '6.0.4.10291-ls289' },
+    { image: 'linuxserver/sabnzbd', regex: '^[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+$', example: '4.5.3-ls229' },
+    { image: 'linuxserver/sonarr', regex: '^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+$', example: '4.0.16.2944-ls299' },
+    { image: 'linuxserver/tautulli', regex: '^v[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+$', example: 'v2.16.0-ls203' },
+    { image: 'n8nio/n8n', regex: '^[0-9]+\\.[0-9]+\\.[0-9]+$', example: '2.0.3' },
+    { image: 'pihole/pihole', regex: '^[0-9]+\\.[0-9]+\\.[0-9]+$', example: '2025.11.1' },
+    { image: 'plexinc/pms-docker', regex: '^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+-[0-9a-f]+$', example: '1.42.2.10156-f737b826c' },
+    { image: 'portainer/portainer-ce', regex: '^[0-9]+\\.[0-9]+\\.[0-9]+$', example: '2.33.1' },
+];
+
 // Global state
 let socket;
 let isDaemonRunning = false;
@@ -365,6 +388,13 @@ function attachCardEventListeners(card, index) {
         }
     });
 
+    // Auto-detect patterns when image name is entered and regex is empty
+    imageInput.addEventListener('blur', () => {
+        if (imageInput.value.trim() && !regexInput.value.trim()) {
+            detectPatterns(card, 3);
+        }
+    });
+
     // Update badges when auto_update or base_tag changes
     autoUpdateCheckbox.addEventListener('change', () => {
         updateCardBadges(card);
@@ -444,8 +474,8 @@ function updateRegexTest(card) {
     }
 }
 
-// Detect tag patterns from registry
-async function detectPatterns(card) {
+// Detect tag patterns from registry (maxPatterns=0 means show all)
+async function detectPatterns(card, maxPatterns = 0) {
     const imageInput = card.querySelector('input[name="image"]');
     const registryInput = card.querySelector('input[name="registry"]');
     const btn = card.querySelector('.btn-detect-patterns');
@@ -490,9 +520,10 @@ async function detectPatterns(card) {
             return;
         }
 
-        // Populate dropdown
+        // Populate dropdown (cap to maxPatterns if set)
+        const patterns = maxPatterns > 0 ? data.patterns.slice(0, maxPatterns) : data.patterns;
         select.innerHTML = '<option value="">-- Select a detected pattern --</option>';
-        data.patterns.forEach(p => {
+        patterns.forEach(p => {
             const option = document.createElement('option');
             option.value = p.regex;
             option.textContent = `${p.label} (${p.match_count} tags, e.g. ${p.example_tags.join(', ')})`;
@@ -501,7 +532,10 @@ async function detectPatterns(card) {
 
         dropdown.style.display = 'block';
         status.className = 'detect-status success';
-        status.textContent = `${data.patterns.length} pattern(s) found from ${data.total_tags} tags`;
+        const shown = maxPatterns > 0 && data.patterns.length > maxPatterns
+            ? `Top ${patterns.length} of ${data.patterns.length}`
+            : `${data.patterns.length}`;
+        status.textContent = `${shown} pattern(s) found from ${data.total_tags} tags`;
 
     } catch (error) {
         status.className = 'detect-status error';
@@ -553,6 +587,98 @@ function addNewImage() {
     setTimeout(() => {
         card.querySelector('input[name="image"]').focus();
     }, 100);
+}
+
+// Show preset selection modal
+function showPresetModal() {
+    // Determine which images are already configured
+    const configuredImages = new Set(imageConfigs.map(c => c.image));
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+
+    let listHtml = IMAGE_PRESETS.map(preset => {
+        const alreadyAdded = configuredImages.has(preset.image);
+        const displayName = preset.registry
+            ? `${preset.registry}/${preset.image}`
+            : preset.image;
+        return `
+            <div class="preset-item${alreadyAdded ? ' preset-disabled' : ''}"
+                 data-image="${escapeHtml(preset.image)}"
+                 data-filter="${escapeHtml(displayName.toLowerCase())}">
+                <div class="preset-name">${escapeHtml(displayName)}</div>
+                <div class="preset-details">
+                    <code class="preset-regex">${escapeHtml(preset.regex)}</code>
+                    <span class="preset-example">e.g. ${escapeHtml(preset.example)}</span>
+                </div>
+                ${alreadyAdded ? '<span class="preset-badge">Already added</span>' : ''}
+            </div>
+        `;
+    }).join('');
+
+    overlay.innerHTML = `
+        <div class="modal-content modal-presets">
+            <div class="modal-title">Add from Preset</div>
+            <input type="text" class="form-input preset-filter" placeholder="Filter images...">
+            <div class="preset-list">${listHtml}</div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary modal-cancel">Cancel</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    // Filter functionality
+    const filterInput = overlay.querySelector('.preset-filter');
+    filterInput.addEventListener('input', () => {
+        const query = filterInput.value.toLowerCase();
+        overlay.querySelectorAll('.preset-item').forEach(item => {
+            const match = item.dataset.filter.includes(query);
+            item.style.display = match ? '' : 'none';
+        });
+    });
+
+    // Click on preset item to add it
+    overlay.querySelectorAll('.preset-item:not(.preset-disabled)').forEach(item => {
+        item.addEventListener('click', () => {
+            const preset = IMAGE_PRESETS.find(p => p.image === item.dataset.image);
+            if (preset) {
+                addFromPreset(preset);
+                overlay.remove();
+            }
+        });
+    });
+
+    // Close handlers
+    overlay.querySelector('.modal-cancel').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) overlay.remove();
+    });
+
+    // Focus filter input
+    setTimeout(() => filterInput.focus(), 100);
+}
+
+// Add a new image card from a preset
+function addFromPreset(preset) {
+    const newConfig = {
+        image: preset.image,
+        regex: preset.regex,
+        base_tag: '',
+        auto_update: false,
+        container_name: '',
+        cleanup_old_images: false,
+        keep_versions: 3,
+        registry: preset.registry || ''
+    };
+
+    imageConfigs.push(newConfig);
+    const card = createImageCard(newConfig, imageConfigs.length - 1, true);
+    dom.imageCards.appendChild(card);
+
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    addLog(`Added preset: ${preset.registry ? preset.registry + '/' : ''}${preset.image}`, 'info');
 }
 
 // Show delete confirmation modal
@@ -858,6 +984,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('refresh-config').addEventListener('click', loadConfig);
     dom.saveConfigBtn.addEventListener('click', saveConfig);
     dom.addImageBtn.addEventListener('click', addNewImage);
+    document.getElementById('add-preset').addEventListener('click', showPresetModal);
 
     // Tab switching
     document.querySelectorAll('.tab-button').forEach(btn => {

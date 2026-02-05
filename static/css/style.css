@@ -714,3 +714,84 @@ h1 {
     box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.15);
 }
 
+/* Preset Modal */
+.modal-presets {
+    max-width: 550px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.preset-filter {
+    margin-bottom: 12px;
+}
+
+.preset-list {
+    overflow-y: auto;
+    margin-bottom: 16px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+}
+
+.preset-item {
+    padding: 10px 14px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.15s;
+    position: relative;
+}
+
+.preset-item:last-child {
+    border-bottom: none;
+}
+
+.preset-item:hover {
+    background: #e3f2fd;
+}
+
+.preset-item.preset-disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.preset-item.preset-disabled:hover {
+    background: transparent;
+}
+
+.preset-name {
+    font-family: monospace;
+    font-weight: 600;
+    font-size: 14px;
+    margin-bottom: 3px;
+}
+
+.preset-details {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.preset-regex {
+    font-size: 12px;
+    background: #f0f0f0;
+    padding: 1px 6px;
+    border-radius: 3px;
+    color: var(--text-secondary);
+}
+
+.preset-example {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+.preset-badge {
+    position: absolute;
+    top: 10px;
+    right: 14px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
