@@ -2,15 +2,14 @@
 
 import re
 import sys
-import pytest
-
-from dum import detect_tag_patterns, _tokenize_tag, _signature_from_tokens, KNOWN_PATTERNS
-
-# conftest.py is auto-loaded by pytest but cannot be directly imported.
-# Import the data constants from it via the tests package.
-import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent))
+
+# Ensure project root is on sys.path for both pytest and direct execution
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import pytest
+from dum import detect_tag_patterns, _tokenize_tag, _signature_from_tokens, KNOWN_PATTERNS
 from conftest import ALL_TAG_LISTS, IMAGE_REGEX_MAP, REGEX_PATTERNS
 
 
@@ -156,12 +155,13 @@ class TestDetectPatterns:
             compiled = re.compile(r['regex'])
             assert not compiled.match("10.11.4-amd64")
 
-    def test_results_sorted_by_count(self):
-        """Results should be sorted by match_count descending."""
+    def test_results_sorted_by_recency(self):
+        """Results should be sorted by most recent tag descending."""
         tags = ["1.0.0", "2.0.0", "3.0.0", "v1.0.0", "v2.0.0"]
         result = detect_tag_patterns(tags)
         if len(result) >= 2:
-            assert result[0]['match_count'] >= result[1]['match_count']
+            # v-prefixed group has the most recent tag (v2.0.0 at index 4)
+            assert result[0]['example_tags'][0].startswith('v')
 
     def test_known_patterns_get_labels(self):
         """Known pattern regexes should get their predefined labels."""
@@ -258,11 +258,8 @@ def interactive_mode():
             registry, namespace, repo = updater._parse_image_reference(image)
             print(f"  Registry: {registry}, Namespace: {namespace}, Repo: {repo}")
 
-            print("  Fetching token...")
-            token = updater._get_docker_token(registry, namespace, repo)
-
-            print("  Fetching tags...")
-            tags = updater._get_all_tags(registry, namespace, repo, token)
+            print("  Fetching tags (ordered by date)...")
+            tags = updater._get_all_tags_by_date(registry, namespace, repo)
 
             if not tags:
                 print("  No tags found. Check the image name.")

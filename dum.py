@@ -396,22 +396,22 @@ class DockerImageUpdater:
     def _get_all_tags(self, registry: str, namespace: str, repo: str, token: Optional[str]) -> List[str]:
         """
         Get all available tags for an image.
-        
+
         Args:
             registry: Registry hostname
             namespace: Image namespace
             repo: Repository name
             token: Authentication token
-            
+
         Returns:
             List of available tags
         """
         tags_url = f"https://{registry}/v2/{namespace}/{repo}/tags/list"
-        
+
         headers = {}
         if token:
             headers['Authorization'] = f'Bearer {token}'
-            
+
         try:
             response = requests.get(tags_url, headers=headers, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
@@ -419,6 +419,48 @@ class DockerImageUpdater:
         except requests.RequestException as e:
             self.logger.error(f"Error getting tags for {namespace}/{repo}: {e}")
             return []
+
+    def _get_all_tags_by_date(self, registry: str, namespace: str, repo: str) -> List[str]:
+        """
+        Get all tags ordered by last_updated (oldest first) via Docker Hub API.
+
+        Falls back to _get_all_tags() for non-Docker Hub registries.
+
+        Args:
+            registry: Registry hostname
+            namespace: Image namespace
+            repo: Repository name
+
+        Returns:
+            List of tags ordered oldest-first (last element = most recent)
+        """
+        if registry != DEFAULT_REGISTRY:
+            token = self._get_docker_token(registry, namespace, repo)
+            return self._get_all_tags(registry, namespace, repo, token)
+
+        tag_dates = []  # list of (name, tag_last_pushed_iso)
+        # Docker Hub: ordering=last_updated gives newest first
+        url = f"https://hub.docker.com/v2/repositories/{namespace}/{repo}/tags?page_size=100&ordering=last_updated"
+        max_tags = 500
+        while url and len(tag_dates) < max_tags:
+            try:
+                response = requests.get(url, timeout=REQUEST_TIMEOUT)
+                response.raise_for_status()
+                data = response.json()
+                for result in data.get('results') or []:
+                    name = result.get('name')
+                    if name:
+                        tag_dates.append((name, result.get('tag_last_pushed', '')))
+                url = data.get('next')
+            except requests.RequestException as e:
+                self.logger.error(f"Error getting tags from Hub API for {namespace}/{repo}: {e}")
+                if not tag_dates:
+                    token = self._get_docker_token(registry, namespace, repo)
+                    return self._get_all_tags(registry, namespace, repo, token)
+                break
+        # Sort by push date ascending — last element = most recently pushed
+        tag_dates.sort(key=lambda x: x[1])
+        return [name for name, _ in tag_dates]
             
     def find_matching_tag(self, image: str, base_tag: str, regex_pattern: str,
                          registry_override: Optional[str] = None) -> Optional[Tuple[str, str]]:
@@ -1110,6 +1152,9 @@ def detect_tag_patterns(tags: List[str]) -> List[Dict[str, Any]]:
     if not filtered:
         return []
 
+    # Build index for recency: last in list = most recently pushed
+    tag_index = {tag: i for i, tag in enumerate(filtered)}
+
     # 2. Tokenize each tag
     tokenized = []  # list of (tag, tokens)
     for tag in filtered:
@@ -1147,18 +1192,22 @@ def detect_tag_patterns(tags: List[str]) -> List[Dict[str, Any]]:
         # 5. Match against KNOWN_PATTERNS for label
         label = KNOWN_PATTERNS.get(regex) or _auto_label(regex)
 
-        # Pick example tags (up to 3, sorted)
-        examples = sorted(matching_tags)[:3]
+        # Pick example tags (up to 3, newest first — last in list = most recent)
+        examples = matching_tags[-3:][::-1]
+
+        # Track recency: index of the most recently pushed tag in this group
+        most_recent_idx = max(tag_index[t] for t in matching_tags)
 
         results.append({
             'regex': regex,
             'label': label,
             'match_count': len(matching_tags),
             'example_tags': examples,
+            '_recency': most_recent_idx,
         })
 
-    # 6. Sort by match_count descending
-    results.sort(key=lambda r: r['match_count'], reverse=True)
+    # 6. Sort by recency (most recently pushed pattern first)
+    results.sort(key=lambda r: r.pop('_recency'), reverse=True)
 
     return results
 
