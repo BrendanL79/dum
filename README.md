@@ -1,5 +1,7 @@
 # Docker Update Manager (dum)
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A Docker image auto-updater that tracks version-specific tags matching regex patterns alongside configurable base tags. Compares manifest digests via registry APIs to detect updates, recreates containers preserving all settings, with rollback on failure.
 
 ## Features
