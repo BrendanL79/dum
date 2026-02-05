@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import pytest
-from dum import detect_tag_patterns, _tokenize_tag, _signature_from_tokens, KNOWN_PATTERNS
+from dum import detect_tag_patterns, detect_base_tags, _tokenize_tag, _signature_from_tokens, KNOWN_PATTERNS
 from conftest import ALL_TAG_LISTS, IMAGE_REGEX_MAP, REGEX_PATTERNS
 
 
@@ -222,6 +222,109 @@ class TestAllTagListsIntegration:
                 f"Regex {r['regex']} claims {r['match_count']} matches "
                 f"but only {len(actual_matches)} tags match"
             )
+
+
+class TestDetectBaseTags:
+    """Test detect_base_tags() base tag detection."""
+
+    def test_empty_tags(self):
+        assert detect_base_tags([], []) == []
+
+    def test_empty_patterns(self):
+        """With no version patterns, all non-noise tags are candidates."""
+        tags = ["latest", "stable", "v1.0.0"]
+        result = detect_base_tags(tags, [])
+        assert "latest" in result
+        assert "stable" in result
+        assert "v1.0.0" in result
+
+    def test_version_tags_excluded(self):
+        """Tags matching a version pattern should not appear in results."""
+        tags = ["latest", "3.20.12", "3.2.29", "nightly"]
+        patterns = [{"regex": r"^[0-9]+\.[0-9]+\.[0-9]+$"}]
+        result = detect_base_tags(tags, patterns)
+        assert "latest" in result
+        assert "nightly" in result
+        assert "3.20.12" not in result
+        assert "3.2.29" not in result
+
+    def test_arch_tags_excluded(self):
+        """Architecture-specific tags should be filtered out."""
+        tags = ["latest", "amd64", "arm64", "latest-amd64", "10.11.4-arm64"]
+        result = detect_base_tags(tags, [])
+        assert "latest" in result
+        assert "amd64" not in result
+        assert "arm64" not in result
+        assert "latest-amd64" not in result
+        assert "10.11.4-arm64" not in result
+
+    def test_sha_refs_excluded(self):
+        """SHA references should be filtered out."""
+        tags = ["latest", "sha-abc1234", "sha256:deadbeef"]
+        result = detect_base_tags(tags, [])
+        assert "latest" in result
+        assert "sha-abc1234" not in result
+        assert "sha256:deadbeef" not in result
+
+    def test_single_char_excluded(self):
+        """Single character tags should be filtered out."""
+        tags = ["latest", "a", "1", "v"]
+        result = detect_base_tags(tags, [])
+        assert "latest" in result
+        assert "a" not in result
+
+    def test_recency_order(self):
+        """Results should be sorted by recency (last in input = first in output)."""
+        tags = ["oldest", "middle", "newest"]
+        result = detect_base_tags(tags, [])
+        assert result[0] == "newest"
+        assert result[-1] == "oldest"
+
+    def test_with_real_patterns(self):
+        """Using detect_tag_patterns output as input should work end-to-end."""
+        tags = ["latest", "nightly", "v8.16.2-ls374", "v8.12.0-ls359", "v8.10.0-ls350"]
+        patterns = detect_tag_patterns(tags)
+        result = detect_base_tags(tags, patterns)
+        assert "latest" in result
+        assert "nightly" in result
+        # Version tags should be excluded
+        for tag in ["v8.16.2-ls374", "v8.12.0-ls359", "v8.10.0-ls350"]:
+            assert tag not in result
+
+    def test_invalid_pattern_regex_skipped(self):
+        """Invalid regex in patterns should be gracefully skipped."""
+        tags = ["latest", "1.0.0", "2.0.0"]
+        patterns = [{"regex": "[invalid"}, {"regex": r"^[0-9]+\.[0-9]+\.[0-9]+$"}]
+        result = detect_base_tags(tags, patterns)
+        assert "latest" in result
+        assert "1.0.0" not in result
+
+    @pytest.mark.parametrize("image", list(ALL_TAG_LISTS.keys()))
+    def test_latest_in_base_tags(self, image):
+        """For every test image that has 'latest', it should appear in base tag results."""
+        tags = ALL_TAG_LISTS[image]
+        if "latest" not in tags:
+            pytest.skip(f"{image} has no 'latest' tag")
+        patterns = detect_tag_patterns(tags)
+        result = detect_base_tags(tags, patterns)
+        assert "latest" in result, f"'latest' not found in base tags for {image}"
+
+    @pytest.mark.parametrize("image", list(ALL_TAG_LISTS.keys()))
+    def test_version_tags_not_in_base_tags(self, image):
+        """For every test image, version tags should NOT appear in base tag results."""
+        tags = ALL_TAG_LISTS[image]
+        expected_key = IMAGE_REGEX_MAP.get(image)
+        if not expected_key:
+            pytest.skip(f"No expected regex mapping for {image}")
+
+        patterns = detect_tag_patterns(tags)
+        result = detect_base_tags(tags, patterns)
+
+        version_regex = re.compile(REGEX_PATTERNS[expected_key])
+        version_tags_in_result = [t for t in result if version_regex.match(t)]
+        assert version_tags_in_result == [], (
+            f"Version tags found in base tags for {image}: {version_tags_in_result}"
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -693,11 +693,13 @@ h1 {
     color: var(--warning-color);
 }
 
-.pattern-dropdown-container {
+.pattern-dropdown-container,
+.basetag-dropdown-container {
     margin-top: 6px;
 }
 
-.pattern-select {
+.pattern-select,
+.basetag-select {
     width: 100%;
     padding: 8px 12px;
     border: 1px solid var(--border);
@@ -708,7 +710,8 @@ h1 {
     cursor: pointer;
 }
 
-.pattern-select:focus {
+.pattern-select:focus,
+.basetag-select:focus {
     outline: none;
     border-color: var(--primary-color);
     box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.15);

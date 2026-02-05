@@ -18,7 +18,7 @@ import jsonschema
 from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO, emit
 
-from dum import DockerImageUpdater, CONFIG_SCHEMA, detect_tag_patterns
+from dum import DockerImageUpdater, CONFIG_SCHEMA, detect_tag_patterns, detect_base_tags
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key')
@@ -225,7 +225,8 @@ def api_detect_patterns():
             return jsonify({'error': f'No tags found for {image}. Check the image name and registry.'}), 404
 
         patterns = detect_tag_patterns(tags)
-        return jsonify({'patterns': patterns, 'total_tags': len(tags)})
+        base_tags = detect_base_tags(tags, patterns)
+        return jsonify({'patterns': patterns, 'base_tags': base_tags, 'total_tags': len(tags)})
 
     except Exception as e:
         logger.error(f"Pattern detection failed: {e}")

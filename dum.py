@@ -1212,6 +1212,48 @@ def detect_tag_patterns(tags: List[str]) -> List[Dict[str, Any]]:
     return results
 
 
+def detect_base_tags(tags: List[str], version_patterns: List[Dict[str, Any]]) -> List[str]:
+    """Detect likely base tags (non-version tags like 'latest', 'stable', 'lts').
+
+    Finds tags that don't match any detected version pattern, filtering out
+    architecture variants and other noise. Returns tags sorted by recency
+    (most recently pushed first).
+    """
+    if not tags:
+        return []
+
+    # Compile version regexes from detected patterns
+    compiled = []
+    for p in version_patterns:
+        try:
+            compiled.append(re.compile(p['regex']))
+        except re.error:
+            continue
+
+    candidates = []
+    for tag in tags:
+        low = tag.lower()
+        # Skip single-char tags
+        if len(tag) <= 1:
+            continue
+        # Skip sha refs
+        if tag.startswith('sha-') or tag.startswith('sha256:'):
+            continue
+        # Skip architecture tags
+        if re.match(r'^(linux-)?(amd64|arm64|arm64v8|armhf|i386|s390x)$', low):
+            continue
+        if re.search(r'-(amd64|arm64|arm64v8|armhf|i386|s390x)$', low):
+            continue
+        # Skip tags that match any detected version pattern
+        if any(r.match(tag) for r in compiled):
+            continue
+        candidates.append(tag)
+
+    # Most recently pushed last in list → reverse for recency-first
+    candidates.reverse()
+    return candidates
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Docker image auto-updater with tag tracking'

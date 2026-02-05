@@ -280,6 +280,11 @@ function createImageCard(config, index, isNew = false) {
                 <input type="text" class="form-input" name="base_tag"
                        value="${escapeHtml(config.base_tag || '')}"
                        placeholder="latest (default)">
+                <div class="basetag-dropdown-container" style="display: none;">
+                    <select class="form-input basetag-select">
+                        <option value="">-- Select a detected base tag --</option>
+                    </select>
+                </div>
             </div>
 
             <div class="form-group">
@@ -385,6 +390,14 @@ function attachCardEventListeners(card, index) {
             regexInput.value = e.target.value;
             validateRegex(regexInput);
             updateRegexTest(card);
+        }
+    });
+
+    // Base tag select dropdown
+    card.querySelector('.basetag-select').addEventListener('change', (e) => {
+        if (e.target.value) {
+            baseTagInput.value = e.target.value;
+            updateCardBadges(card);
         }
     });
 
@@ -536,6 +549,23 @@ async function detectPatterns(card, maxPatterns = 0) {
             ? `Top ${patterns.length} of ${data.patterns.length}`
             : `${data.patterns.length}`;
         status.textContent = `${shown} pattern(s) found from ${data.total_tags} tags`;
+
+        // Populate base tag dropdown if base_tag field is empty
+        const baseTagInput = card.querySelector('input[name="base_tag"]');
+        const baseTagDropdown = card.querySelector('.basetag-dropdown-container');
+        const baseTagSelect = card.querySelector('.basetag-select');
+
+        if (data.base_tags && data.base_tags.length > 0 && !baseTagInput.value.trim()) {
+            const baseTags = maxPatterns > 0 ? data.base_tags.slice(0, maxPatterns) : data.base_tags;
+            baseTagSelect.innerHTML = '<option value="">-- Select a detected base tag --</option>';
+            baseTags.forEach(tag => {
+                const option = document.createElement('option');
+                option.value = tag;
+                option.textContent = tag;
+                baseTagSelect.appendChild(option);
+            });
+            baseTagDropdown.style.display = 'block';
+        }
 
     } catch (error) {
         status.className = 'detect-status error';
