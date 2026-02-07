@@ -21,13 +21,14 @@ Python-based Docker image auto-updater that tracks version-specific tags matchin
     "regex": "^v[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+$",
     "base_tag": "latest",
     "auto_update": false,
-    "container_name": "calibre",
     "cleanup_old_images": true,
     "keep_versions": 3,
     "registry": "optional-custom-registry"
   }]
 }
 ```
+
+**Note:** Containers are auto-detected. The updater automatically discovers and updates all containers using each configured image. Multiple containers with the same image (e.g., `sonarr-hd` and `sonarr-4k` both using `linuxserver/sonarr`) are all updated automatically.
 
 ## Common Regex Patterns
 - LinuxServer.io: `^[0-9]+\.[0-9]+\.[0-9]+-ls[0-9]+$` or `^v[0-9]+\.[0-9]+\.[0-9]+-ls[0-9]+$`
@@ -36,11 +37,13 @@ Python-based Docker image auto-updater that tracks version-specific tags matchin
 
 ## Architecture
 - **No Docker SDK** — direct HTTP to registries via `requests`, Docker socket for local operations
+- **Auto-discovery** — `docker ps -a --format json` scans all containers, matches by image name with registry/tag normalization
 - **State persistence** via `ImageState` dataclass serialized to JSON with atomic writes (temp+rename)
 - **Cross-platform** file locking (Unix fcntl / Windows msvcrt)
 - **Registry auth**: Docker Hub, ghcr.io (/token endpoint), gcr.io, private registries
 - **Manifest comparison**: HEAD requests for digest comparison, parallel tag fetching via ThreadPoolExecutor
 - **Current version detection**: Cross-references container image ID with local image inventory
+- **Multi-container updates**: Parallel updates with per-container success tracking
 - **Config validation**: JSON schema (`CONFIG_SCHEMA`) validated on load and on web UI save
 - **Web UI**: Vanilla JS + Socket.IO CDN, no build process; gunicorn with gevent for WebSocket
 

@@ -62,7 +62,6 @@ CONFIG_SCHEMA = {
                     "regex": {"type": "string"},
                     "base_tag": {"type": "string"},
                     "auto_update": {"type": "boolean"},
-                    "container_name": {"type": "string"},
                     "registry": {"type": "string"},
                     "cleanup_old_images": {"type": "boolean"},
                     "keep_versions": {"type": "integer", "minimum": 1}
@@ -595,6 +594,84 @@ class DockerImageUpdater:
             self.logger.error(f"Error parsing container config for '{container_name}': {e}")
             return None
 
+    def _get_containers_for_image(self, image: str) -> List[Dict[str, str]]:
+        """Get all containers (running or stopped) using a specific image.
+
+        Returns:
+            List of dicts with keys: name, id, state, image_ref
+        """
+        try:
+            result = subprocess.run(
+                ['docker', 'ps', '-a', '--format', 'json'],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+
+            containers = []
+            for line in result.stdout.strip().split('\n'):
+                if not line:
+                    continue
+                try:
+                    container = json.loads(line)
+                    container_image = container.get('Image', '')
+
+                    if self._image_matches(image, container_image):
+                        containers.append({
+                            'name': container.get('Names', ''),
+                            'id': container.get('ID', ''),
+                            'state': container.get('State', ''),
+                            'image_ref': container_image
+                        })
+                except json.JSONDecodeError:
+                    continue
+
+            return containers
+
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"Failed to list containers: {e}")
+            return []
+
+    def _image_matches(self, config_image: str, container_image: str) -> bool:
+        """Check if a container image matches the configured image.
+
+        Handles:
+        - Tag variations: nginx matches nginx:alpine
+        - Registry prefixes: linuxserver/sonarr matches lscr.io/linuxserver/sonarr:latest
+        - Implicit library namespace: postgres matches library/postgres
+        """
+        # Normalize images by removing tags for comparison
+        def normalize(img: str) -> str:
+            # Split on last colon to separate tag
+            parts = img.rsplit(':', 1)
+            base = parts[0]
+
+            # Handle registry prefixes (keep everything before /)
+            # linuxserver/sonarr stays as-is
+            # lscr.io/linuxserver/sonarr becomes linuxserver/sonarr
+            if '/' in base:
+                path_parts = base.split('/')
+                # If first part has a dot or is localhost, it's a registry
+                if '.' in path_parts[0] or path_parts[0] == 'localhost':
+                    base = '/'.join(path_parts[1:])
+
+            # Handle implicit library namespace
+            # postgres becomes library/postgres for comparison
+            if '/' not in base:
+                return f"library/{base}"
+
+            return base
+
+        normalized_config = normalize(config_image)
+        normalized_container = normalize(container_image)
+
+        # Also check without library prefix
+        normalized_config_no_lib = normalized_config.replace('library/', '')
+        normalized_container_no_lib = normalized_container.replace('library/', '')
+
+        return (normalized_config == normalized_container or
+                normalized_config_no_lib == normalized_container_no_lib)
+
     def _get_container_current_tag(self, container_name: str, image: str, regex: str) -> Optional[str]:
         """Get the current version tag of a running container by checking image inventory."""
         try:
@@ -704,7 +781,34 @@ class DockerImageUpdater:
         except subprocess.CalledProcessError as e:
             self.logger.error(f"Error updating container: {e}")
             return False
-            
+
+    def _update_containers(self, container_names: List[str], image: str, tag: str) -> Dict[str, bool]:
+        """Update multiple containers to a new image tag.
+
+        Args:
+            container_names: List of container names to update
+            image: Base image name
+            tag: Target tag to update to
+
+        Returns:
+            Dict mapping container_name -> success boolean
+        """
+        results = {}
+        for container_name in container_names:
+            self.logger.info(f"Updating container {container_name} to {image}:{tag}")
+            success = self._update_container(container_name, image, tag)
+            results[container_name] = success
+
+        # Log summary
+        success_count = sum(1 for v in results.values() if v)
+        total_count = len(results)
+        if success_count == total_count:
+            self.logger.info(f"Container update summary: {success_count}/{total_count} succeeded (all)")
+        else:
+            self.logger.warning(f"Container update summary: {success_count}/{total_count} succeeded")
+
+        return results
+
     def _build_run_command(self, container_name: str, image: str, 
                           container_info: Dict[str, Any]) -> List[str]:
         """Build docker run command preserving container settings."""
@@ -908,7 +1012,6 @@ class DockerImageUpdater:
             regex = image_config['regex']
             base_tag = image_config.get('base_tag', DEFAULT_BASE_TAG)
             auto_update = image_config.get('auto_update', False)
-            container_name = image_config.get('container_name')
             registry = image_config.get('registry')
             cleanup = image_config.get('cleanup_old_images', False)
             keep_versions = image_config.get('keep_versions', 3)
@@ -926,11 +1029,14 @@ class DockerImageUpdater:
                 # Check if this is different from our saved state
                 saved_state = self.state.get(image)
 
+                # Discover all containers using this image
+                containers = self._get_containers_for_image(image)
+
                 if not saved_state or saved_state.digest != digest:
-                    # Try to get current tag from saved state, or from running container
+                    # Determine current version (from saved state or first container)
                     old_tag = saved_state.tag if saved_state else None
-                    if not old_tag and container_name:
-                        old_tag = self._get_container_current_tag(container_name, image, regex)
+                    if not old_tag and containers:
+                        old_tag = self._get_container_current_tag(containers[0]['name'], image, regex)
                     if not old_tag:
                         old_tag = 'unknown'
 
@@ -953,12 +1059,18 @@ class DockerImageUpdater:
                             if self._pull_image(image, base_tag):
                                 self._pull_image(image, matching_tag)
 
-                                # Update container if specified
-                                # Use version-specific tag so the container
-                                # shows an informative image reference and
-                                # the tag won't be orphaned by future pulls
-                                if container_name:
-                                    update_ok = self._update_container(container_name, image, matching_tag)
+                                if containers:
+                                    # Update all discovered containers
+                                    container_names = [c['name'] for c in containers]
+                                    self.logger.info(f"Found {len(containers)} container(s) using {image}: {', '.join(container_names)}")
+                                    update_results = self._update_containers(container_names, image, matching_tag)
+
+                                    # Success if any container updated
+                                    update_ok = any(update_results.values()) if update_results else True
+                                else:
+                                    # No containers - just image update
+                                    self.logger.info(f"No containers found for {image}, image updated only")
+                                    update_ok = True
 
                                 # Only cleanup old images after a successful update,
                                 # otherwise we may remove tags still in use

@@ -5,15 +5,13 @@
       "regex": "^v[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+$",
       "base_tag": "latest",
       "auto_update": false,
-      "container_name": "calibre",
       "cleanup_old_images": true
     },
     {
       "image": "postgres",
       "regex": "^[0-9]+\\.[0-9]+$",
       "base_tag": "14",
-      "auto_update": false,
-      "container_name": "postgres_db"
+      "auto_update": false
     },
     {
       "image": "gcr.io/my-project/my-app",

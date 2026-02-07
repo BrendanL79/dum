@@ -170,7 +170,6 @@ def full_config():
             "regex": r"^v[0-9]+\.[0-9]+\.[0-9]+-ls[0-9]+$",
             "base_tag": "latest",
             "auto_update": False,
-            "container_name": "calibre",
             "cleanup_old_images": True,
             "keep_versions": 3,
         }]

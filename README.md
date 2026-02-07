@@ -86,10 +86,11 @@ The regex pattern then finds the specific version tag (e.g., "15.4-alpine", "202
 | `regex` | string | Regex pattern to match version tags | Yes | - |
 | `base_tag` | string | Base tag to track (e.g., "latest", "stable", "15") | No | "latest" |
 | `auto_update` | boolean | Whether to automatically pull and update | No | false |
-| `container_name` | string | Name of container to update after pulling | No | - |
 | `cleanup_old_images` | boolean | Remove old images after successful update | No | false |
 | `keep_versions` | integer | Number of image versions to retain when cleanup is enabled | No | 3 |
 | `registry` | string | Custom registry URL (e.g., "ghcr.io", "lscr.io") | No | Docker Hub |
+
+**Note:** Containers are auto-detected. The updater automatically discovers and updates all containers using each configured image.
 
 ### Example Configuration
 
@@ -101,7 +102,6 @@ The regex pattern then finds the specific version tag (e.g., "15.4-alpine", "202
       "regex": "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+-ls[0-9]+$",
       "base_tag": "latest",
       "auto_update": false,
-      "container_name": "sonarr",
       "cleanup_old_images": true,
       "keep_versions": 3
     },
@@ -109,15 +109,13 @@ The regex pattern then finds the specific version tag (e.g., "15.4-alpine", "202
       "image": "portainer/portainer-ce",
       "regex": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
       "base_tag": "lts",
-      "auto_update": false,
-      "container_name": "portainer"
+      "auto_update": false
     },
     {
       "image": "homarr-labs/homarr",
       "regex": "^v[0-9]+\\.[0-9]+\\.[0-9]+$",
       "registry": "ghcr.io",
-      "auto_update": false,
-      "container_name": "homarr"
+      "auto_update": false
     }
   ]
 }

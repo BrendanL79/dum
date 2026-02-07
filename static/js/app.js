@@ -287,13 +287,6 @@ function createImageCard(config, index, isNew = false) {
                 </div>
             </div>
 
-            <div class="form-group">
-                <label>Container Name</label>
-                <input type="text" class="form-input" name="container_name"
-                       value="${escapeHtml(config.container_name || '')}"
-                       placeholder="e.g., calibre">
-            </div>
-
             <div class="form-row checkbox-row">
                 <label class="checkbox-label">
                     <input type="checkbox" name="auto_update" ${config.auto_update ? 'checked' : ''}>
@@ -405,11 +398,6 @@ function attachCardEventListeners(card, index) {
     imageInput.addEventListener('blur', () => {
         const imageName = imageInput.value.trim();
         if (imageName) {
-            // Auto-populate container name if empty
-            const containerInput = card.querySelector('input[name="container_name"]');
-            if (!containerInput.value.trim()) {
-                containerInput.value = imageName.split('/').pop();
-            }
             // Auto-detect patterns if regex is empty
             if (!regexInput.value.trim()) {
                 detectPatterns(card, 3);
@@ -611,7 +599,6 @@ function addNewImage() {
         regex: '',
         base_tag: '',
         auto_update: false,
-        container_name: '',
         cleanup_old_images: false,
         keep_versions: 3,
         registry: ''
@@ -706,7 +693,6 @@ function addFromPreset(preset) {
         regex: preset.regex,
         base_tag: '',
         auto_update: false,
-        container_name: preset.image.split('/').pop(),
         cleanup_old_images: false,
         keep_versions: 3,
         registry: preset.registry || ''
@@ -817,14 +803,12 @@ function collectFormData() {
 
         // Add optional fields only if they have values
         const baseTag = card.querySelector('input[name="base_tag"]').value.trim();
-        const containerName = card.querySelector('input[name="container_name"]').value.trim();
         const registry = card.querySelector('input[name="registry"]').value.trim();
         const autoUpdate = card.querySelector('input[name="auto_update"]').checked;
         const cleanup = card.querySelector('input[name="cleanup_old_images"]').checked;
         const keepVersions = parseInt(card.querySelector('input[name="keep_versions"]').value, 10) || 3;
 
         if (baseTag) config.base_tag = baseTag;
-        if (containerName) config.container_name = containerName;
         if (registry) config.registry = registry;
         config.auto_update = autoUpdate;
         config.cleanup_old_images = cleanup;
