@@ -1,7 +1,13 @@
 FROM python:3.11-slim
 
-# Install required packages
+LABEL org.opencontainers.image.title="dum-webui"
+LABEL org.opencontainers.image.description="Docker Update Manager — Web UI"
+LABEL org.opencontainers.image.source="https://github.com/BrendanL79/dum"
+LABEL org.opencontainers.image.licenses="MIT"
+
+# Install required packages (curl for healthcheck, docker.io for socket access)
 RUN apt-get update && apt-get install -y \
+    curl \
     docker.io \
     && rm -rf /var/lib/apt/lists/*
 
@@ -29,6 +35,10 @@ ENV DRY_RUN=true
 
 # Expose web port
 EXPOSE 5050
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD curl -f http://localhost:5050/api/status || exit 1
 
 # Run the web UI with gunicorn
 CMD ["gunicorn", "--worker-class", "geventwebsocket.gunicorn.workers.GeventWebSocketWorker", "-w", "1", "--bind", "0.0.0.0:5050", "webui:app"]

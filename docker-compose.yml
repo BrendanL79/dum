@@ -68,7 +68,8 @@ services:
       - STATE_FILE=/state/docker_update_state.json
       - DRY_RUN=true
       - LOG_LEVEL=INFO
-      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      # - WEBUI_USER=admin
+      # - WEBUI_PASSWORD=changeme
     networks:
       - dum-net
     labels:
@@ -96,7 +97,8 @@ services:
       - STATE_FILE=/state/docker_update_state.json
       - DRY_RUN=false
       - LOG_LEVEL=INFO
-      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      # - WEBUI_USER=admin
+      # - WEBUI_PASSWORD=changeme
     networks:
       - dum-net
     labels:

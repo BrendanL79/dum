@@ -57,7 +57,7 @@ Combine profiles for both CLI + Web UI. Never mount socket `:rw` unless auto-upd
 ## Environment Variables
 **CLI (`dum.py`)**: `--dry-run`, `--daemon`, `--interval SECONDS`, `--state PATH`, `--log-level LEVEL`, positional config path
 
-**Web UI (`webui.py`)**: `CONFIG_FILE`, `STATE_FILE`, `DRY_RUN=true`, `LOG_LEVEL=INFO`, `SECRET_KEY`
+**Web UI (`webui.py`)**: `CONFIG_FILE`, `STATE_FILE`, `DRY_RUN=true`, `LOG_LEVEL=INFO`, `WEBUI_USER`, `WEBUI_PASSWORD`
 
 ## Code Conventions
 - **Type hints** throughout (Tuple, Optional, Dict, etc.)
@@ -69,6 +69,8 @@ Combine profiles for both CLI + Web UI. Never mount socket `:rw` unless auto-upd
 - **Socket.IO**: All `socketio.emit()` from background threads must include `namespace='/'`
 - **State updates**: State is updated whenever a new version is detected, regardless of `auto_update` setting, to prevent re-reporting in daemon mode. Disk persistence is skipped in dry-run mode.
 - **Config booleans**: `auto_update` and `cleanup_old_images` are always saved explicitly (including `false`), never omitted
+- **Auth**: Optional basic auth via `WEBUI_USER`/`WEBUI_PASSWORD` env vars; `hmac.compare_digest` for credential checks
+- **Versioning**: `__version__` in `dum.py`, semver, CI publishes Docker images on `v*` tags
 
 ## Dependencies
 - **Core**: `requests`, `jsonschema`

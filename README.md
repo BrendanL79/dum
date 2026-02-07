@@ -16,7 +16,8 @@ A Docker image auto-updater that tracks version-specific tags matching regex pat
 - **Container Management**: Preserves all container settings during updates with automatic rollback on failure
 - **State Persistence**: Tracks current versions/digests with atomic file writes and cross-platform file locking
 - **Current Version Detection**: Cross-references container image IDs with local image inventory
-- **Production Ready**: Gunicorn with gevent for WebSocket support
+- **Optional Authentication**: Basic auth via environment variables, or use a reverse proxy
+- **Production Ready**: Gunicorn with gevent for WebSocket support, Docker health checks, CI/CD
 
 ## Quick Start
 
@@ -222,7 +223,8 @@ All services share the `dum-net` bridge network.
 | `DRY_RUN` | Enable dry-run mode | `true` | Web UI |
 | `LOG_LEVEL` | Logging verbosity | `INFO` | Both |
 | `CHECK_INTERVAL` | Seconds between checks | `3600` | CLI |
-| `SECRET_KEY` | Flask secret key | `dev-secret-key-change-in-production` | Web UI |
+| `WEBUI_USER` | Basic auth username (optional) | (disabled) | Web UI |
+| `WEBUI_PASSWORD` | Basic auth password (optional) | (disabled) | Web UI |
 
 ## Web UI Guide
 
@@ -271,10 +273,10 @@ When `auto_update: true` and an update is detected:
 ### Docker Socket Access
 - **Dry-run mode** mounts the socket read-only (`:ro`) - safe for monitoring
 - **Production mode** requires write access (`:rw`) for pulling images and recreating containers
+- Containers run as root because Docker socket access requires it (same as Portainer, Watchtower, Diun)
 
 ### Web UI Security
-- Change `SECRET_KEY` from the default for production deployments
-- No built-in authentication - use a reverse proxy with auth if exposing publicly
+- **Authentication**: Set `WEBUI_USER` and `WEBUI_PASSWORD` environment variables to enable basic auth. When both are set, all HTTP and WebSocket connections require credentials. When unset, access is unrestricted (suitable for trusted LANs).
 - Runs on port 5050 by default
 
 ### Best Practices
@@ -356,6 +358,8 @@ dum/
 ├── docker-compose.yml          # Multi-profile deployment
 ├── requirements.txt            # Core dependencies
 ├── requirements-webui.txt      # Web UI dependencies
+├── .env.example                # Environment variable reference
+├── CHANGELOG.md                # Version history
 ├── config_example.json         # Example configuration
 ├── templates/
 │   └── index.html              # Dashboard HTML
@@ -363,6 +367,7 @@ dum/
 │   ├── css/style.css           # Web UI styles
 │   └── js/app.js               # Frontend (Socket.IO, config editor, presets)
 ├── tests/                      # Test suite
+├── .github/workflows/          # CI/CD (test on push, publish on tag)
 ├── config/                     # Runtime config (gitignored)
 │   ├── config.json
 │   └── history.json            # Persistent update history
@@ -372,8 +377,8 @@ dum/
 
 ## Roadmap
 
-- Authentication for Web UI
 - Email/webhook notifications
 - Rollback functionality via Web UI
 - Update scheduling/maintenance windows
 - Private registry authentication UI
+- Multi-stage Docker builds for smaller images

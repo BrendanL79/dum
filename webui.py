@@ -3,6 +3,9 @@
 Web UI for Docker Image Auto-Updater
 """
 
+import base64
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -15,14 +18,14 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 
 import jsonschema
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, Response
 from flask_socketio import SocketIO, emit
 
-from dum import DockerImageUpdater, CONFIG_SCHEMA, detect_tag_patterns, detect_base_tags
+from dum import DockerImageUpdater, CONFIG_SCHEMA, detect_tag_patterns, detect_base_tags, __version__
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key')
-socketio = SocketIO(app, cors_allowed_origins="*")
+app.config['SECRET_KEY'] = os.urandom(32).hex()
+socketio = SocketIO(app)
 
 # Global variables
 updater: Optional[DockerImageUpdater] = None
@@ -42,6 +45,36 @@ MAX_HISTORY_ENTRIES = 500  # Limit history size
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Optional basic auth
+AUTH_USER = os.environ.get('WEBUI_USER', '').strip()
+AUTH_PASSWORD = os.environ.get('WEBUI_PASSWORD', '').strip()
+AUTH_ENABLED = bool(AUTH_USER and AUTH_PASSWORD)
+
+if AUTH_ENABLED:
+    logger.info("Basic authentication enabled")
+
+
+def _check_credentials(username: str, password: str) -> bool:
+    """Verify credentials using constant-time comparison."""
+    return (hmac.compare_digest(username, AUTH_USER) and
+            hmac.compare_digest(password, AUTH_PASSWORD))
+
+
+@app.before_request
+def require_auth():
+    """Enforce basic auth on all requests when enabled."""
+    if not AUTH_ENABLED:
+        return None
+
+    auth = request.authorization
+    if auth and _check_credentials(auth.username, auth.password):
+        return None
+
+    return Response(
+        'Authentication required', 401,
+        {'WWW-Authenticate': 'Basic realm="dum"'}
+    )
 
 
 def load_history():
@@ -167,6 +200,12 @@ def api_status():
         'config_file': updater.config_file.as_posix() if updater else None,
         'state_file': updater.state_file.as_posix() if updater else None
     })
+
+
+@app.route('/api/version')
+def api_version():
+    """Get application version."""
+    return jsonify({'version': __version__})
 
 
 @app.route('/api/config')
@@ -315,7 +354,12 @@ def api_daemon():
 
 @socketio.on('connect')
 def handle_connect():
-    """Handle client connection."""
+    """Handle client connection, rejecting unauthenticated Socket.IO when auth is enabled."""
+    if AUTH_ENABLED:
+        auth = request.authorization
+        if not auth or not _check_credentials(auth.username, auth.password):
+            return False  # Reject connection
+
     emit('connected', {'status': 'Connected to Docker Updater'})
     
     # Send current status

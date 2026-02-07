@@ -1,0 +1,16 @@
+.claude/
+.git/
+.github/
+config/
+state/
+tests/
+docs/
+__pycache__/
+*.md
+*.txt
+!requirements*.txt
+docker-compose.yml
+Dockerfile*
+.env*
+.gitignore
+.dockerignore

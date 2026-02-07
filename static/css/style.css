@@ -288,6 +288,13 @@ h1 {
     color: #dcdcaa;
 }
 
+.app-footer {
+    text-align: center;
+    padding: 15px 0 5px;
+    color: #999;
+    font-size: 12px;
+}
+
 .log-line.info {
     color: #4fc1ff;
 }

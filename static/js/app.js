@@ -1014,6 +1014,12 @@ document.addEventListener('DOMContentLoaded', () => {
     dom.saveConfigBtn = document.getElementById('save-config');
     dom.historyList = document.getElementById('history-list');
     dom.daemonInterval = document.getElementById('daemon-interval');
+    dom.appVersion = document.getElementById('app-version');
+
+    // Load version into footer
+    fetch('/api/version').then(r => r.json()).then(data => {
+        dom.appVersion.textContent = `dum v${data.version}`;
+    }).catch(() => {});
 
     initSocket();
 
