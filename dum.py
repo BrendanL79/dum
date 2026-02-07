@@ -947,6 +947,7 @@ class DockerImageUpdater:
                             'auto_update': auto_update
                         })
 
+                        update_ok = True
                         if auto_update:
                             # Pull the new images
                             if self._pull_image(image, base_tag):
@@ -957,19 +958,25 @@ class DockerImageUpdater:
                                 # shows an informative image reference and
                                 # the tag won't be orphaned by future pulls
                                 if container_name:
-                                    self._update_container(container_name, image, matching_tag)
+                                    update_ok = self._update_container(container_name, image, matching_tag)
 
-                                # Cleanup old images if requested
-                                if cleanup:
+                                # Only cleanup old images after a successful update,
+                                # otherwise we may remove tags still in use
+                                if update_ok and cleanup:
                                     self._cleanup_old_images(image, keep_versions)
+                            else:
+                                update_ok = False
 
-                        # Update state to prevent re-reporting
-                        self.state[image] = ImageState(
-                            base_tag=base_tag,
-                            tag=matching_tag,
-                            digest=digest,
-                            last_updated=datetime.now().isoformat()
-                        )
+                        # Update state: always for non-auto (to prevent
+                        # re-reporting), but only on success for auto_update
+                        # so the update is retried next cycle
+                        if not auto_update or update_ok:
+                            self.state[image] = ImageState(
+                                base_tag=base_tag,
+                                tag=matching_tag,
+                                digest=digest,
+                                last_updated=datetime.now().isoformat()
+                            )
                     else:
                         self.logger.info(f"Already up to date: {matching_tag}")
                 else:
