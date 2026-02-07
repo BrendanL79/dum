@@ -1,20 +1,23 @@
-FROM python:3.11-slim
+# Stage 1: Get Docker CLI binary
+FROM docker:27-cli AS docker-cli
+
+# Stage 2: Build final image
+FROM python:3.11-alpine
 
 LABEL org.opencontainers.image.title="dum-cli"
 LABEL org.opencontainers.image.description="Docker Update Manager — CLI daemon"
 LABEL org.opencontainers.image.source="https://github.com/BrendanL79/dum"
 LABEL org.opencontainers.image.licenses="MIT"
 
-# Install required packages
-RUN apt-get update && apt-get install -y \
-    docker.io \
-    && rm -rf /var/lib/apt/lists/*
+# Copy only the docker CLI binary from official image
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 
 # Create app directory
 WORKDIR /app
 
 # Copy requirements first for better caching
 COPY requirements.txt .
+# Install Python packages (requests and jsonschema are pure Python, no build deps needed)
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the application
