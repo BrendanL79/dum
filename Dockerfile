@@ -21,7 +21,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the application
-COPY dum.py .
+COPY dum.py pattern_utils.py ./
 
 # Create directories for config and state
 RUN mkdir -p /config /state
