@@ -43,6 +43,9 @@ daemon_interval = 3600
 HISTORY_FILE = Path(os.environ.get('CONFIG_FILE', '/config/config.json')).parent / 'history.json'
 MAX_HISTORY_ENTRIES = 500  # Limit history size
 
+# Daemon state file (in state directory for persistence across restarts)
+DAEMON_STATE_FILE = Path(os.environ.get('STATE_FILE', '/state/docker_update_state.json')).parent / 'daemon_state.json'
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -102,6 +105,43 @@ def save_history():
             json.dump(trimmed, f, indent=2)
     except IOError as e:
         logger.error(f"Could not save history file: {e}")
+
+
+def save_daemon_state():
+    """Persist daemon enabled/interval to disk."""
+    try:
+        with open(DAEMON_STATE_FILE, 'w') as f:
+            json.dump({'enabled': daemon_running, 'interval': daemon_interval}, f)
+    except IOError as e:
+        logger.error(f"Could not save daemon state: {e}")
+
+
+def restore_daemon_state():
+    """Start daemon if it was running before container restart."""
+    global daemon_running, daemon_thread, daemon_interval
+
+    try:
+        if not DAEMON_STATE_FILE.exists():
+            return  # OOBE: no state file means daemon stays off
+
+        with open(DAEMON_STATE_FILE, 'r') as f:
+            state = json.load(f)
+
+        if not state.get('enabled', False):
+            return
+
+        if not updater:
+            logger.warning("Cannot restore daemon: updater not loaded")
+            return
+
+        daemon_interval = state.get('interval', 3600)
+        daemon_running = True
+        daemon_stop_event.clear()
+        daemon_thread = threading.Thread(target=daemon_worker, args=(daemon_interval,))
+        daemon_thread.start()
+        logger.info(f"Restored daemon (interval={daemon_interval}s) from previous state")
+    except (json.JSONDecodeError, IOError) as e:
+        logger.warning(f"Could not restore daemon state: {e}")
 
 
 def load_updater():
@@ -342,6 +382,7 @@ def api_daemon():
         daemon_stop_event.clear()
         daemon_thread = threading.Thread(target=daemon_worker, args=(daemon_interval,))
         daemon_thread.start()
+        save_daemon_state()
 
         return jsonify({'status': 'started', 'interval': daemon_interval})
 
@@ -353,6 +394,7 @@ def api_daemon():
         daemon_stop_event.set()
         if daemon_thread:
             daemon_thread.join(timeout=5)
+        save_daemon_state()
 
         return jsonify({'status': 'stopped'})
         
@@ -381,6 +423,7 @@ def handle_connect():
 # Load updater and history on startup (runs when gunicorn imports this module)
 load_updater()
 load_history()
+restore_daemon_state()
 
 if __name__ == '__main__':
     # For local development only
