@@ -584,8 +584,15 @@ class DockerImageUpdater:
                 check=True
             )
             return json.loads(result.stdout)[0]
-        except (subprocess.CalledProcessError, json.JSONDecodeError, IndexError) as e:
-            self.logger.error(f"Error getting container config: {e}")
+        except subprocess.CalledProcessError as e:
+            stderr = (e.stderr or '').strip()
+            self.logger.error(
+                f"Error inspecting container '{container_name}': {stderr or e}. "
+                f"Check that the container_name in config matches a running container (docker ps -a --format '{{{{.Names}}}}')"
+            )
+            return None
+        except (json.JSONDecodeError, IndexError) as e:
+            self.logger.error(f"Error parsing container config for '{container_name}': {e}")
             return None
 
     def _get_container_current_tag(self, container_name: str, image: str, regex: str) -> Optional[str]:
@@ -705,7 +712,13 @@ class DockerImageUpdater:
         
         config = container_info['Config']
         host_config = container_info['HostConfig']
-        
+
+        # Determine network mode constraints
+        network_mode = host_config.get('NetworkMode', 'default')
+        is_host_network = network_mode == 'host'
+        is_container_network = network_mode.startswith('container:')
+        shares_network_namespace = is_host_network or is_container_network
+
         # Restart policy
         restart_policy = host_config.get('RestartPolicy', {})
         if restart_policy.get('Name'):
@@ -713,35 +726,37 @@ class DockerImageUpdater:
                 cmd.extend(['--restart', f"on-failure:{restart_policy.get('MaximumRetryCount', 0)}"])
             else:
                 cmd.extend(['--restart', restart_policy['Name']])
-                
-        # Hostname
-        if config.get('Hostname') and config['Hostname'] != container_info['Id'][:12]:
-            cmd.extend(['--hostname', config['Hostname']])
-            
+
+        # Hostname (not allowed with host or container: network modes)
+        if not shares_network_namespace:
+            if config.get('Hostname') and config['Hostname'] != container_info['Id'][:12]:
+                cmd.extend(['--hostname', config['Hostname']])
+
         # User
         if config.get('User'):
             cmd.extend(['--user', config['User']])
-            
+
         # Working directory
         if config.get('WorkingDir'):
             cmd.extend(['--workdir', config['WorkingDir']])
-            
+
         # Environment variables
         for env_var in config.get('Env') or []:
             # Skip Docker-injected variables
             if not any(env_var.startswith(prefix) for prefix in ('PATH=', 'HOSTNAME=')):
                 cmd.extend(['-e', env_var])
-                
-        # Port mappings
-        for container_port, bindings in (host_config.get('PortBindings') or {}).items():
-            if bindings:
-                for binding in bindings:
-                    host_ip = binding.get('HostIp', '')
-                    host_port = binding.get('HostPort', '')
-                    if host_ip and host_ip != '0.0.0.0':
-                        cmd.extend(['-p', f"{host_ip}:{host_port}:{container_port}"])
-                    else:
-                        cmd.extend(['-p', f"{host_port}:{container_port}"])
+
+        # Port mappings (not applicable with host or container: network modes)
+        if not shares_network_namespace:
+            for container_port, bindings in (host_config.get('PortBindings') or {}).items():
+                if bindings:
+                    for binding in bindings:
+                        host_ip = binding.get('HostIp', '')
+                        host_port = binding.get('HostPort', '')
+                        if host_ip and host_ip != '0.0.0.0':
+                            cmd.extend(['-p', f"{host_ip}:{host_port}:{container_port}"])
+                        else:
+                            cmd.extend(['-p', f"{host_port}:{container_port}"])
                         
         # Volume mappings
         for mount in container_info.get('Mounts') or []:
@@ -758,13 +773,14 @@ class DockerImageUpdater:
             cmd.extend(['-v', mount_str])
                 
         # Network mode
-        if host_config.get('NetworkMode') and host_config['NetworkMode'] != 'default':
-            cmd.extend(['--network', host_config['NetworkMode']])
-            
-        # Additional networks
-        for network in ((container_info.get('NetworkSettings') or {}).get('Networks') or {}).keys():
-            if network != host_config.get('NetworkMode'):
-                cmd.extend(['--network', network])
+        if network_mode and network_mode != 'default':
+            cmd.extend(['--network', network_mode])
+
+        # Additional networks (not applicable with container: network mode)
+        if not is_container_network:
+            for network in ((container_info.get('NetworkSettings') or {}).get('Networks') or {}).keys():
+                if network != network_mode:
+                    cmd.extend(['--network', network])
                 
         # Privileged
         if host_config.get('Privileged'):
