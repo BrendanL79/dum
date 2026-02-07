@@ -9,7 +9,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import pytest
-from dum import detect_tag_patterns, detect_base_tags, _tokenize_tag, _signature_from_tokens, KNOWN_PATTERNS
+from pattern_utils import (
+    detect_tag_patterns,
+    detect_base_tags,
+    _tokenize_tag,
+    _signature_from_tokens,
+    KNOWN_PATTERNS
+)
 from conftest import ALL_TAG_LISTS, IMAGE_REGEX_MAP, REGEX_PATTERNS
 
 

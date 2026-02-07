@@ -21,7 +21,8 @@ import jsonschema
 from flask import Flask, render_template, jsonify, request, Response
 from flask_socketio import SocketIO, emit
 
-from dum import DockerImageUpdater, CONFIG_SCHEMA, detect_tag_patterns, detect_base_tags, __version__
+from dum import DockerImageUpdater, CONFIG_SCHEMA, __version__
+from pattern_utils import detect_tag_patterns, detect_base_tags
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.urandom(32).hex()
