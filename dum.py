@@ -811,10 +811,11 @@ class DockerImageUpdater:
         if host_config.get('CpuQuota'):
             cmd.extend(['--cpu-quota', str(host_config['CpuQuota'])])
             
-        # Labels
+        # Labels (preserve compose labels for stack membership)
         for key, value in (config.get('Labels') or {}).items():
-            # Skip Docker-injected labels
-            if not key.startswith('com.docker.'):
+            if key.startswith('com.docker.compose.'):
+                cmd.extend(['--label', f"{key}={value}"])
+            elif not key.startswith('com.docker.'):
                 cmd.extend(['--label', f"{key}={value}"])
 
         # Security options
@@ -952,8 +953,11 @@ class DockerImageUpdater:
                                 self._pull_image(image, matching_tag)
 
                                 # Update container if specified
+                                # Use version-specific tag so the container
+                                # shows an informative image reference and
+                                # the tag won't be orphaned by future pulls
                                 if container_name:
-                                    self._update_container(container_name, image, base_tag)
+                                    self._update_container(container_name, image, matching_tag)
 
                                 # Cleanup old images if requested
                                 if cleanup:
