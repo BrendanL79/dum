@@ -4,7 +4,7 @@ import json
 import pytest
 from dataclasses import asdict
 
-from dum import ImageState
+from ium import ImageState
 
 
 class TestImageStateSerialization:

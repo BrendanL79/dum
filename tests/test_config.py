@@ -4,7 +4,7 @@ import copy
 import pytest
 import jsonschema
 
-from dum import CONFIG_SCHEMA
+from ium import CONFIG_SCHEMA
 
 
 class TestConfigSchemaValid:

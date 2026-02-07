@@ -214,7 +214,7 @@ class TestRegexEdgeCases:
         assert filter_tags([], pat) == []
 
     def test_match_uses_match_not_search(self):
-        """Verify pattern.match anchors at start (dum.py uses match, not search)."""
+        """Verify pattern.match anchors at start (ium.py uses match, not search)."""
         pat = get_pattern("simple_semver")
         # "prefix-1.2.3" should not match because match() anchors at start
         assert not pat.match("prefix-1.2.3")

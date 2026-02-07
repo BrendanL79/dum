@@ -1,10 +1,10 @@
-"""Shared fixtures for dum tests."""
+"""Shared fixtures for ium tests."""
 
 import re
 import pytest
 from dataclasses import asdict
 
-from dum import CONFIG_SCHEMA, ImageState
+from ium import CONFIG_SCHEMA, ImageState
 
 # ---------------------------------------------------------------------------
 # Tag lists derived from the real Docker image inventory (test_data.txt)
@@ -142,7 +142,7 @@ def get_pattern(key: str) -> re.Pattern:
 
 
 def filter_tags(tags: list[str], pattern: re.Pattern) -> list[str]:
-    """Return tags that match the pattern (same logic as dum.py)."""
+    """Return tags that match the pattern (same logic as ium.py)."""
     return [t for t in tags if pattern.match(t)]
 
 

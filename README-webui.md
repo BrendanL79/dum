@@ -1,6 +1,6 @@
-# Docker Updater Web UI
+# Image Update Manager Web UI
 
-This branch adds a web-based interface for the Docker Image Auto-Updater.
+This branch adds a web-based interface for the Image Update Manager.
 
 ## Features
 
@@ -70,7 +70,7 @@ Real-time updates via Socket.IO:
 ## Environment Variables
 
 - `CONFIG_FILE` - Path to config.json (default: /config/config.json)
-- `STATE_FILE` - Path to state file (default: /state/docker_update_state.json)
+- `STATE_FILE` - Path to state file (default: /state/image_update_state.json)
 - `DRY_RUN` - Enable dry-run mode (default: true)
 - `LOG_LEVEL` - Logging level (default: INFO)
 - `SECRET_KEY` - Flask secret key for sessions
@@ -93,7 +93,7 @@ pip install -r requirements.txt -r requirements-webui.txt
 # Set environment variables
 export FLASK_APP=webui.py
 export CONFIG_FILE=config/config.json
-export STATE_FILE=state/docker_update_state.json
+export STATE_FILE=state/image_update_state.json
 
 # Run the development server
 python webui.py

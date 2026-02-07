@@ -3,7 +3,7 @@
 import json
 import pytest
 from unittest.mock import Mock, patch
-from dum import DockerImageUpdater
+from ium import DockerImageUpdater
 
 
 @pytest.fixture

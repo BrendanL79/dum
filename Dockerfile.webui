@@ -4,9 +4,9 @@ FROM docker:27-cli AS docker-cli
 # Stage 2: Build final image
 FROM python:3.11-alpine
 
-LABEL org.opencontainers.image.title="dum"
-LABEL org.opencontainers.image.description="Docker Update Manager"
-LABEL org.opencontainers.image.source="https://github.com/BrendanL79/dum"
+LABEL org.opencontainers.image.title="ium"
+LABEL org.opencontainers.image.description="Image Update Manager"
+LABEL org.opencontainers.image.source="https://github.com/BrendanL79/ium"
 LABEL org.opencontainers.image.licenses="MIT"
 
 # Copy only the docker CLI binary from official image
@@ -26,7 +26,7 @@ RUN apk add --no-cache --virtual .build-deps gcc musl-dev linux-headers \
     && apk del .build-deps
 
 # Copy the application files
-COPY dum.py webui.py pattern_utils.py ./
+COPY ium.py webui.py pattern_utils.py ./
 COPY templates templates/
 COPY static static/
 
@@ -37,7 +37,7 @@ RUN mkdir -p /config /state /var/log
 ENV PYTHONUNBUFFERED=1
 ENV FLASK_APP=webui.py
 ENV CONFIG_FILE=/config/config.json
-ENV STATE_FILE=/state/docker_update_state.json
+ENV STATE_FILE=/state/image_update_state.json
 ENV DRY_RUN=false
 
 # Expose web port

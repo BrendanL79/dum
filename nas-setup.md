@@ -1,6 +1,6 @@
-# Setting Up Docker Auto-Updater on NAS
+# Setting Up Image Update Manager on NAS
 
-This guide will help you set up the Docker auto-updater on your NAS in dry-run mode.
+This guide will help you set up the Image Update Manager on your NAS in dry-run mode.
 
 ## Prerequisites
 
@@ -24,7 +24,7 @@ mkdir -p config state
 ### 2. Copy files
 
 Copy these files to your NAS:
-- `dum.py`
+- `ium.py`
 - `Dockerfile`
 - `requirements.txt`
 - `docker-compose.yml`
@@ -137,7 +137,7 @@ sudo usermod -aG docker your-nas-user
 
 ### View state file
 ```bash
-cat state/docker_update_state.json | jq .
+cat state/image_update_state.json | jq .
 ```
 
 ### Test single run

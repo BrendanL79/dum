@@ -1,4 +1,4 @@
-# Docker Update Manager (dum)
+# Image Update Manager (ium)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -25,8 +25,8 @@ A Docker image auto-updater that tracks version-specific tags matching regex pat
 
 1. **Clone and configure:**
 ```bash
-git clone https://github.com/BrendanL79/dum.git
-cd dum
+git clone https://github.com/BrendanL79/ium.git
+cd ium
 mkdir -p config state
 ```
 
@@ -39,7 +39,7 @@ You can create `config/config.json` manually or use the Web UI to configure imag
 docker-compose up -d
 
 # CLI daemon only
-docker-compose --profile cli up -d dum-cli
+docker-compose --profile cli up -d ium-cli
 ```
 
 3. **Access Web UI** (if enabled): http://localhost:5050
@@ -156,10 +156,10 @@ docker-compose up -d
 
 ### 2. CLI Daemon
 ```bash
-docker-compose --profile cli up -d dum-cli
+docker-compose --profile cli up -d ium-cli
 ```
 - Background daemon, hourly checks (configurable via `CHECK_INTERVAL`)
-- Monitor logs: `docker logs -f dum-cli`
+- Monitor logs: `docker logs -f ium-cli`
 
 ### 3. Web UI + CLI Daemon
 ```bash
@@ -169,7 +169,7 @@ docker-compose --profile cli up -d
 
 ### 4. Standalone CLI
 ```bash
-python dum.py config/config.json [options]
+python ium.py config/config.json [options]
 ```
 
 **Options (all have env var equivalents):**
@@ -183,10 +183,10 @@ python dum.py config/config.json [options]
 
 | Service | Description | Profile |
 |---------|-------------|---------|
-| `dum` | Web UI | (default) |
-| `dum-cli` | CLI daemon | `cli` |
+| `ium` | Web UI | (default) |
+| `ium-cli` | CLI daemon | `cli` |
 
-Both services share the `dum-net` bridge network.
+Both services share the `ium-net` bridge network.
 
 **Volumes:**
 - `./config:/config` - Configuration and update history
@@ -198,7 +198,7 @@ Both services share the `dum-net` bridge network.
 | Variable | Description | Default | Used by |
 |----------|-------------|---------|---------|
 | `CONFIG_FILE` | Path to config JSON | `/config/config.json` | Both |
-| `STATE_FILE` | Path to state JSON | `/state/docker_update_state.json` | Both |
+| `STATE_FILE` | Path to state JSON | `/state/image_update_state.json` | Both |
 | `DRY_RUN` | Enable dry-run mode | `false` | Both |
 | `DAEMON` | Run continuously | `true` | CLI |
 | `CHECK_INTERVAL` | Seconds between checks | `3600` | CLI |
@@ -270,8 +270,8 @@ When `auto_update: true` and an update is detected:
 
 **"No check performed yet" persists**
 - Click "Check Now" to trigger first check
-- Verify container is running: `docker ps --filter "name=dum"`
-- Check logs: `docker logs dum`
+- Verify container is running: `docker ps --filter "name=ium"`
+- Check logs: `docker logs ium`
 
 **"No tag matching pattern found"**
 - Use the Web UI's regex test input to validate your pattern against a known tag
@@ -284,7 +284,7 @@ When `auto_update: true` and an update is detected:
 
 **Web UI shows "Disconnected"**
 - Check container is running and port 5050 is accessible
-- Review logs: `docker logs dum`
+- Review logs: `docker logs ium`
 
 **Updates not applying in production mode**
 - Verify `auto_update: true` in config
@@ -298,7 +298,7 @@ When `auto_update: true` and an update is detected:
 LOG_LEVEL=DEBUG
 
 # Via CLI
-python dum.py config.json --log-level DEBUG
+python ium.py config.json --log-level DEBUG
 ```
 
 ## NAS Deployment
@@ -307,8 +307,8 @@ See `nas-setup.md` for detailed instructions. Quick start:
 
 ```bash
 cd /volume1/docker
-git clone https://github.com/BrendanL79/dum.git
-cd dum
+git clone https://github.com/BrendanL79/ium.git
+cd ium
 mkdir -p config state
 echo '{"images": []}' > config/config.json
 docker-compose up -d --build
@@ -330,8 +330,8 @@ Test modules cover configuration validation, tag pattern detection, image refere
 ## Project Structure
 
 ```
-dum/
-├── dum.py                      # Core updater engine
+ium/
+├── ium.py                      # Core updater engine
 ├── webui.py                    # Flask-SocketIO web server
 ├── Dockerfile                  # CLI daemon image
 ├── Dockerfile.webui            # Web UI image
@@ -352,7 +352,7 @@ dum/
 │   ├── config.json
 │   └── history.json            # Persistent update history
 └── state/                      # Runtime state (gitignored)
-    └── docker_update_state.json
+    └── image_update_state.json
 ```
 
 ## Roadmap

@@ -13,7 +13,7 @@ Requires network access. May be slow or flaky if registries are down.
 import re
 import pytest
 
-from dum import DockerImageUpdater, DEFAULT_REGISTRY
+from ium import DockerImageUpdater, DEFAULT_REGISTRY
 from tests.conftest import REGEX_PATTERNS, get_pattern
 
 pytestmark = pytest.mark.live

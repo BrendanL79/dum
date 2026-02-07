@@ -2,7 +2,7 @@
 
 import pytest
 
-from dum import DockerImageUpdater, DEFAULT_REGISTRY, DEFAULT_NAMESPACE
+from ium import DockerImageUpdater, DEFAULT_REGISTRY, DEFAULT_NAMESPACE
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +126,7 @@ class TestPlatformStringParsing:
 class TestTagSorting:
     """Test the lexicographic sort behavior used by find_matching_tag.
 
-    dum.py uses matching_tags.sort(reverse=True) which is lexicographic.
+    ium.py uses matching_tags.sort(reverse=True) which is lexicographic.
     This documents where it works and where it doesn't.
     """
 

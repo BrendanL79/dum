@@ -1,10 +1,10 @@
 services:
-  dum:
+  ium:
     build:
       context: .
       dockerfile: Dockerfile.webui
-    image: dum:latest
-    container_name: dum
+    image: ium:latest
+    container_name: ium
     restart: unless-stopped
     ports:
       - "5050:5050"
@@ -17,12 +17,12 @@ services:
       # - WEBUI_USER=admin
       # - WEBUI_PASSWORD=changeme
     networks:
-      - dum-net
+      - ium-net
 
-  dum-cli:
+  ium-cli:
     build: .
-    image: dum-cli:latest
-    container_name: dum-cli
+    image: ium-cli:latest
+    container_name: ium-cli
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -31,15 +31,15 @@ services:
     environment:
       - LOG_LEVEL=INFO
     networks:
-      - dum-net
+      - ium-net
     profiles:
       - cli
 
 networks:
-  dum-net:
+  ium-net:
     driver: bridge
 
 # Usage:
 # 1. Web UI (default): docker-compose up -d
-# 2. CLI daemon only: docker-compose --profile cli up -d dum-cli
+# 2. CLI daemon only: docker-compose --profile cli up -d ium-cli
 # 3. Both: docker-compose --profile cli up -d

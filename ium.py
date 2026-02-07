@@ -86,7 +86,7 @@ class ImageState:
 
 
 class DockerImageUpdater:
-    def __init__(self, config_file: str, state_file: str = "docker_update_state.json", 
+    def __init__(self, config_file: str, state_file: str = "image_update_state.json",
                  dry_run: bool = False, log_level: str = "INFO"):
         """
         Initialize the Docker Image Updater.
@@ -1187,7 +1187,7 @@ class DockerImageUpdater:
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Docker image auto-updater with tag tracking'
+        description='Image auto-updater with tag tracking'
     )
     parser.add_argument(
         'config',
@@ -1197,8 +1197,8 @@ def main():
     )
     parser.add_argument(
         '--state',
-        default=os.environ.get('STATE_FILE', 'docker_update_state.json'),
-        help='Path to state file (env: STATE_FILE, default: docker_update_state.json)'
+        default=os.environ.get('STATE_FILE', 'image_update_state.json'),
+        help='Path to state file (env: STATE_FILE, default: image_update_state.json)'
     )
     parser.add_argument(
         '--dry-run',

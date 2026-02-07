@@ -340,7 +340,7 @@ class TestDetectBaseTags:
 def interactive_mode():
     """Interactive mode for testing pattern detection against real registries."""
     # Import here to avoid making it a hard dependency for pytest
-    from dum import DockerImageUpdater
+    from ium import DockerImageUpdater
     import tempfile, json, os
 
     print("=" * 60)

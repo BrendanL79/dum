@@ -4,9 +4,9 @@ FROM docker:27-cli AS docker-cli
 # Stage 2: Build final image
 FROM python:3.11-alpine
 
-LABEL org.opencontainers.image.title="dum-cli"
-LABEL org.opencontainers.image.description="Docker Update Manager — CLI daemon"
-LABEL org.opencontainers.image.source="https://github.com/BrendanL79/dum"
+LABEL org.opencontainers.image.title="ium-cli"
+LABEL org.opencontainers.image.description="Image Update Manager — CLI daemon"
+LABEL org.opencontainers.image.source="https://github.com/BrendanL79/ium"
 LABEL org.opencontainers.image.licenses="MIT"
 
 # Copy only the docker CLI binary from official image
@@ -21,7 +21,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the application
-COPY dum.py pattern_utils.py ./
+COPY ium.py pattern_utils.py ./
 
 # Create directories for config and state
 RUN mkdir -p /config /state
@@ -29,7 +29,7 @@ RUN mkdir -p /config /state
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV CONFIG_FILE=/config/config.json
-ENV STATE_FILE=/state/docker_update_state.json
+ENV STATE_FILE=/state/image_update_state.json
 ENV DRY_RUN=false
 ENV DAEMON=true
 ENV CHECK_INTERVAL=3600
@@ -37,6 +37,6 @@ ENV LOG_LEVEL=INFO
 
 # Health check — verify the daemon process is running
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD pgrep -f "python dum.py" || exit 1
+  CMD pgrep -f "python ium.py" || exit 1
 
-CMD ["python", "dum.py"]
+CMD ["python", "ium.py"]

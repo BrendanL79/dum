@@ -4,7 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [1.0.0] - 2026-02-05
+## [Unreleased]
+
+### Changed
+- Rebranded from "dum" (Docker Update Manager) to "ium" (Image Update Manager)
+- Renamed `dum.py` to `ium.py`
+- Renamed state file from `docker_update_state.json` to `image_update_state.json`
+- Updated Docker Compose service names (`dum` → `ium`, `dum-cli` → `ium-cli`, `dum-net` → `ium-net`)
+- Updated Docker Hub image names (`brendanl79/dum` → `brendanl79/ium`, `brendanl79/dum-cli` → `brendanl79/ium-cli`)
+
+### Fixed
+- Digest-only image updates (image rebuilt under the same tag) are now correctly detected and applied instead of being falsely reported as "already up to date"
 
 ### Added
 - Core updater engine with registry API integration (Docker Hub, ghcr.io, lscr.io, gcr.io, private registries)

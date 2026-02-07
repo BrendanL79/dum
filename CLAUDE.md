@@ -1,17 +1,17 @@
-# Docker Auto-Updater (dum)
+# Image Update Manager (ium)
 
 Python-based Docker image auto-updater that tracks version-specific tags matching regex patterns alongside configurable base tags. Compares manifest digests to detect updates, recreates containers preserving all settings, with rollback on failure.
 
 ## Key Files
-- `dum.py`: Core updater — `DockerImageUpdater` class, registry API, container management
+- `ium.py`: Core updater — `DockerImageUpdater` class, registry API, container management
 - `webui.py`: Flask-SocketIO web interface with gunicorn/gevent production server
 - `static/js/app.js`: Frontend — Socket.IO, card-based config editor, live regex validation
 - `static/css/style.css`: Web UI styling
 - `templates/index.html`: Dashboard structure
-- `docker-compose.yml`: Two services (dum Web UI default, dum-cli with `cli` profile)
+- `docker-compose.yml`: Two services (ium Web UI default, ium-cli with `cli` profile)
 - `config/config.json`: Image definitions (runtime, gitignored)
 - `config/history.json`: Persistent update history (auto-managed, max 500 entries)
-- `state/docker_update_state.json`: Current versions/digests (runtime, gitignored)
+- `state/image_update_state.json`: Current versions/digests (runtime, gitignored)
 
 ## Configuration Schema
 ```json
@@ -50,13 +50,13 @@ Python-based Docker image auto-updater that tracks version-specific tags matchin
 ## Deployment
 | Service | Profile | Command |
 |---------|---------|---------|
-| Web UI (`dum`) | (default) | `docker-compose up -d` |
-| CLI daemon (`dum-cli`) | `cli` | `docker-compose --profile cli up -d dum-cli` |
+| Web UI (`ium`) | (default) | `docker-compose up -d` |
+| CLI daemon (`ium-cli`) | `cli` | `docker-compose --profile cli up -d ium-cli` |
 
 Both services mount the Docker socket `:rw`. Updates are safe by default — `auto_update` is `false` per image.
 
 ## Environment Variables
-**CLI (`dum.py`)**: `--dry-run`, `--daemon`, `--interval SECONDS`, `--state PATH`, `--log-level LEVEL`, positional config path. All flags have env var equivalents: `DRY_RUN`, `DAEMON`, `CHECK_INTERVAL`, `STATE_FILE`, `LOG_LEVEL`, `CONFIG_FILE`
+**CLI (`ium.py`)**: `--dry-run`, `--daemon`, `--interval SECONDS`, `--state PATH`, `--log-level LEVEL`, positional config path. All flags have env var equivalents: `DRY_RUN`, `DAEMON`, `CHECK_INTERVAL`, `STATE_FILE`, `LOG_LEVEL`, `CONFIG_FILE`
 
 **Web UI (`webui.py`)**: `CONFIG_FILE`, `STATE_FILE`, `DRY_RUN=false`, `LOG_LEVEL=INFO`, `WEBUI_USER`, `WEBUI_PASSWORD`
 
@@ -71,7 +71,7 @@ Both services mount the Docker socket `:rw`. Updates are safe by default — `au
 - **State updates**: State is updated whenever a new version is detected, regardless of `auto_update` setting, to prevent re-reporting in daemon mode. Disk persistence is skipped in dry-run mode.
 - **Config booleans**: `auto_update` and `cleanup_old_images` are always saved explicitly (including `false`), never omitted
 - **Auth**: Optional basic auth via `WEBUI_USER`/`WEBUI_PASSWORD` env vars; `hmac.compare_digest` for credential checks
-- **Versioning**: `__version__` in `dum.py`, semver, CI publishes Docker images on `v*` tags
+- **Versioning**: `__version__` in `ium.py`, semver, CI publishes Docker images on `v*` tags
 
 ## Dependencies
 - **Core**: `requests`, `jsonschema`

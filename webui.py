@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Web UI for Docker Image Auto-Updater
+Web UI for Image Update Manager
 """
 
 import base64
@@ -21,7 +21,7 @@ import jsonschema
 from flask import Flask, render_template, jsonify, request, Response
 from flask_socketio import SocketIO, emit
 
-from dum import DockerImageUpdater, CONFIG_SCHEMA, __version__
+from ium import DockerImageUpdater, CONFIG_SCHEMA, __version__
 from pattern_utils import detect_tag_patterns, detect_base_tags
 
 app = Flask(__name__)
@@ -44,7 +44,7 @@ HISTORY_FILE = Path(os.environ.get('CONFIG_FILE', '/config/config.json')).parent
 MAX_HISTORY_ENTRIES = 500  # Limit history size
 
 # Daemon state file (in state directory for persistence across restarts)
-DAEMON_STATE_FILE = Path(os.environ.get('STATE_FILE', '/state/docker_update_state.json')).parent / 'daemon_state.json'
+DAEMON_STATE_FILE = Path(os.environ.get('STATE_FILE', '/state/image_update_state.json')).parent / 'daemon_state.json'
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -77,7 +77,7 @@ def require_auth():
 
     return Response(
         'Authentication required', 401,
-        {'WWW-Authenticate': 'Basic realm="dum"'}
+        {'WWW-Authenticate': 'Basic realm="ium"'}
     )
 
 
@@ -148,7 +148,7 @@ def load_updater():
     """Load or reload the updater instance."""
     global updater
     config_file = os.environ.get('CONFIG_FILE', '/config/config.json')
-    state_file = os.environ.get('STATE_FILE', '/state/docker_update_state.json')
+    state_file = os.environ.get('STATE_FILE', '/state/image_update_state.json')
     dry_run = os.environ.get('DRY_RUN', 'false').lower() == 'true'
     log_level = os.environ.get('LOG_LEVEL', 'INFO')
     

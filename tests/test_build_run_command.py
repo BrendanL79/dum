@@ -2,7 +2,7 @@
 
 import pytest
 
-from dum import DockerImageUpdater
+from ium import DockerImageUpdater
 
 
 @pytest.fixture

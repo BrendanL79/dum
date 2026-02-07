@@ -1023,7 +1023,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Load version into footer
     fetch('/api/version').then(r => r.json()).then(data => {
-        dom.appVersion.textContent = `dum v${data.version}`;
+        dom.appVersion.textContent = `ium v${data.version}`;
     }).catch(() => {});
 
     initSocket();

@@ -2,7 +2,7 @@
 
 ## Goal
 
-Publish dum to Docker Hub as `brendanl79/dum` (CLI) and `brendanl79/dum-webui` (Web UI) at version 1.0.0. Address security, infrastructure, and packaging gaps to meet the expectations of public Docker Hub users.
+Publish ium to Docker Hub as `brendanl79/ium` (CLI) and `brendanl79/ium-webui` (Web UI) at version 1.0.0. Address security, infrastructure, and packaging gaps to meet the expectations of public Docker Hub users.
 
 ## Decisions
 
@@ -67,7 +67,7 @@ CLI Dockerfile checks process existence instead (no HTTP server).
 ### 3. Project Infrastructure
 
 **Version tracking:**
-- `__version__ = "1.0.0"` in `dum.py`
+- `__version__ = "1.0.0"` in `ium.py`
 - `/api/version` endpoint in `webui.py`
 - Version displayed in Web UI footer
 
@@ -78,7 +78,7 @@ CLI Dockerfile checks process existence instead (no HTTP server).
 **`.env.example`:**
 ```env
 CONFIG_FILE=/config/config.json
-STATE_FILE=/state/docker_update_state.json
+STATE_FILE=/state/image_update_state.json
 DRY_RUN=true
 LOG_LEVEL=INFO
 # SECRET_KEY=your-secret-here

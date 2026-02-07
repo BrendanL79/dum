@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Docker Image Auto-Updater Setup Script
-# This script helps set up and manage the Docker image auto-updater
+# Image Update Manager Setup Script
+# This script helps set up and manage the Image Update Manager
 
 set -e
 
@@ -136,7 +136,7 @@ check_updates() {
     fi
     
     print_info "Checking for updates..."
-    python3 "$PYTHON_SCRIPT" "$CONFIG_FILE" --state "$STATE_DIR/docker_update_state.json" --check-only
+    python3 "$PYTHON_SCRIPT" "$CONFIG_FILE" --state "$STATE_DIR/image_update_state.json" --check-only
 }
 
 run_updates() {
@@ -146,7 +146,7 @@ run_updates() {
     fi
     
     print_info "Running updates..."
-    python3 "$PYTHON_SCRIPT" "$CONFIG_FILE" --state "$STATE_DIR/docker_update_state.json"
+    python3 "$PYTHON_SCRIPT" "$CONFIG_FILE" --state "$STATE_DIR/image_update_state.json"
 }
 
 run_daemon() {
@@ -160,17 +160,17 @@ run_daemon() {
     
     print_info "Starting daemon mode (checking every $interval seconds)..."
     print_info "Press Ctrl+C to stop"
-    python3 "$PYTHON_SCRIPT" "$CONFIG_FILE" --state "$STATE_DIR/docker_update_state.json" --daemon --interval "$interval"
+    python3 "$PYTHON_SCRIPT" "$CONFIG_FILE" --state "$STATE_DIR/image_update_state.json" --daemon --interval "$interval"
 }
 
 setup_systemd() {
     print_info "Setting up systemd service..."
     
-    SERVICE_FILE="/etc/systemd/system/docker-updater.service"
+    SERVICE_FILE="/etc/systemd/system/image-updater.service"
     
     sudo tee "$SERVICE_FILE" > /dev/null << EOF
 [Unit]
-Description=Docker Image Auto-Updater
+Description=Image Update Manager
 After=docker.service
 Requires=docker.service
 
@@ -178,7 +178,7 @@ Requires=docker.service
 Type=simple
 User=$USER
 WorkingDirectory=$SCRIPT_DIR
-ExecStart=/usr/bin/python3 $PYTHON_SCRIPT $CONFIG_FILE --state $STATE_DIR/docker_update_state.json --daemon --interval 3600
+ExecStart=/usr/bin/python3 $PYTHON_SCRIPT $CONFIG_FILE --state $STATE_DIR/image_update_state.json --daemon --interval 3600
 Restart=always
 RestartSec=10
 
@@ -192,10 +192,10 @@ EOF
     read -p "Do you want to enable and start the service now? (y/N): " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        sudo systemctl enable docker-updater.service
-        sudo systemctl start docker-updater.service
+        sudo systemctl enable image-updater.service
+        sudo systemctl start image-updater.service
         print_success "Service enabled and started"
-        print_info "Check status with: sudo systemctl status docker-updater.service"
+        print_info "Check status with: sudo systemctl status image-updater.service"
     fi
 }
 
@@ -230,7 +230,7 @@ setup_cron() {
     esac
     
     # Add to crontab
-    (crontab -l 2>/dev/null; echo "$schedule /usr/bin/python3 $PYTHON_SCRIPT $CONFIG_FILE --state $STATE_DIR/docker_update_state.json") | crontab -
+    (crontab -l 2>/dev/null; echo "$schedule /usr/bin/python3 $PYTHON_SCRIPT $CONFIG_FILE --state $STATE_DIR/image_update_state.json") | crontab -
     
     print_success "Cron job added ($desc)"
     print_info "View cron jobs with: crontab -l"
@@ -238,7 +238,7 @@ setup_cron() {
 
 show_menu() {
     echo
-    echo "Docker Image Auto-Updater Menu"
+    echo "Image Update Manager Menu"
     echo "==============================="
     echo "1. Initial setup"
     echo "2. Edit configuration"
@@ -254,9 +254,9 @@ show_menu() {
 }
 
 view_state() {
-    if [ -f "$STATE_DIR/docker_update_state.json" ]; then
+    if [ -f "$STATE_DIR/image_update_state.json" ]; then
         print_info "Current state:"
-        python3 -m json.tool "$STATE_DIR/docker_update_state.json"
+        python3 -m json.tool "$STATE_DIR/image_update_state.json"
     else
         print_info "No state file found. Run an update check first."
     fi
@@ -264,7 +264,7 @@ view_state() {
 
 # Main menu loop
 main() {
-    print_info "Docker Image Auto-Updater Setup"
+    print_info "Image Update Manager Setup"
     
     while true; do
         show_menu
