@@ -76,6 +76,44 @@ CONFIG_SCHEMA = {
 }
 
 
+def _validate_regex(pattern: str, timeout: float = 2.0) -> re.Pattern:
+    """Compile a regex pattern and test it against a short string to detect ReDoS.
+
+    Raises ValueError on invalid pattern or catastrophic backtracking.
+    """
+    try:
+        compiled = re.compile(pattern)
+    except re.error as e:
+        raise ValueError(f"Invalid regex pattern '{pattern}': {e}")
+
+    # Test-match against a string that can trigger catastrophic backtracking
+    test_string = "a" * 100
+    import threading
+    result = [None]
+    error = [None]
+
+    def _run():
+        try:
+            compiled.match(test_string)
+            result[0] = True
+        except Exception as e:
+            error[0] = e
+
+    t = threading.Thread(target=_run)
+    t.start()
+    t.join(timeout=timeout)
+
+    if t.is_alive():
+        raise ValueError(
+            f"Regex pattern '{pattern}' is too expensive (possible ReDoS). "
+            f"Simplify the pattern to avoid catastrophic backtracking."
+        )
+    if error[0]:
+        raise ValueError(f"Regex pattern '{pattern}' failed test: {error[0]}")
+
+    return compiled
+
+
 @dataclass
 class ImageState:
     """State information for a tracked image."""
@@ -136,10 +174,7 @@ class DockerImageUpdater:
             # Validate and cache regex patterns
             for image_config in config.get('images', []):
                 regex_pattern = image_config['regex']
-                try:
-                    self.compiled_patterns[regex_pattern] = re.compile(regex_pattern)
-                except re.error as e:
-                    raise ValueError(f"Invalid regex pattern '{regex_pattern}': {e}")
+                self.compiled_patterns[regex_pattern] = _validate_regex(regex_pattern)
                     
             return config
             

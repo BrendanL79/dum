@@ -530,7 +530,7 @@ async function detectPatterns(card, maxPatterns = 0) {
     try {
         const response = await fetch('/api/detect-patterns', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
             body: JSON.stringify({
                 image: image,
                 registry: registryInput.value.trim()
@@ -853,7 +853,7 @@ async function saveConfig() {
     try {
         const response = await fetch('/api/config', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
             body: JSON.stringify({ images: configs })
         });
 
@@ -930,7 +930,10 @@ async function loadUpdates() {
 async function checkNow() {
     try {
         addLog('Starting manual check...', 'info');
-        const response = await fetch('/api/check', { method: 'POST' });
+        const response = await fetch('/api/check', {
+            method: 'POST',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
         
         if (!response.ok) {
             const error = await response.json();
@@ -949,7 +952,7 @@ async function toggleDaemon() {
 
         const response = await fetch('/api/daemon', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
             body: JSON.stringify({ action, interval: parseInt(interval) })
         });
 

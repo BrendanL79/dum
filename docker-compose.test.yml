@@ -1,0 +1,51 @@
+# Test environment for manual upgrade scenario verification
+# Usage: docker compose -f docker-compose.test.yml up -d
+
+services:
+  # --- Test target containers (old versions) ---
+  test-nginx:
+    image: nginx:1.24.0
+    container_name: test-nginx
+
+  test-redis:
+    image: redis:7.2.0
+    container_name: test-redis
+
+  test-alpine:
+    image: alpine:3.18.0
+    container_name: test-alpine
+    command: sleep infinity
+
+  test-sonarr:
+    image: linuxserver/sonarr:4.0.0.748-ls1
+    container_name: test-sonarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+
+  test-calibre:
+    image: linuxserver/calibre:v7.0.0-ls200
+    container_name: test-calibre
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+
+  # --- ium Web UI ---
+  ium-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.webui
+    container_name: ium-test
+    ports:
+      - "5051:5050"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./config:/config
+      - ./state/test:/state
+    environment:
+      - LOG_LEVEL=DEBUG
+      - CONFIG_FILE=/config/test-config.json
+      - STATE_FILE=/state/image_update_state.json
+      - DRY_RUN=true

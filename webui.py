@@ -21,7 +21,7 @@ import jsonschema
 from flask import Flask, render_template, jsonify, request, Response
 from flask_socketio import SocketIO, emit
 
-from ium import DockerImageUpdater, CONFIG_SCHEMA, __version__
+from ium import DockerImageUpdater, CONFIG_SCHEMA, __version__, _validate_regex
 from pattern_utils import detect_tag_patterns, detect_base_tags
 
 app = Flask(__name__)
@@ -57,6 +57,11 @@ AUTH_ENABLED = bool(AUTH_USER and AUTH_PASSWORD)
 
 if AUTH_ENABLED:
     logger.info("Basic authentication enabled")
+else:
+    logger.warning(
+        "Authentication is DISABLED. The web UI is accessible without credentials. "
+        "Set WEBUI_USER and WEBUI_PASSWORD environment variables to enable authentication."
+    )
 
 
 def _check_credentials(username: str, password: str) -> bool:
@@ -79,6 +84,20 @@ def require_auth():
         'Authentication required', 401,
         {'WWW-Authenticate': 'Basic realm="ium"'}
     )
+
+
+@app.before_request
+def require_csrf():
+    """Reject state-changing requests missing the X-Requested-With header.
+
+    Browsers block cross-origin custom headers by default, so requiring
+    this header on POST/PUT/DELETE prevents cross-site request forgery
+    without tokens or extra dependencies.  GET and SocketIO transport
+    requests are exempt.
+    """
+    if request.method in ('POST', 'PUT', 'DELETE'):
+        if request.headers.get('X-Requested-With') != 'XMLHttpRequest':
+            return jsonify({'error': 'CSRF check failed'}), 403
 
 
 def load_history():
@@ -222,11 +241,16 @@ def daemon_worker(interval):
     """Background worker for daemon mode."""
     global daemon_running
 
+    logger.info(f"Daemon started (interval={interval}s)")
     while daemon_running:
-        run_check()
+        try:
+            run_check()
+        except Exception as e:
+            logger.error(f"Daemon check cycle failed unexpectedly: {e}\n{traceback.format_exc()}")
         # Wait with efficient interruption support
         if daemon_stop_event.wait(timeout=interval):
             break
+    logger.info("Daemon stopped")
 
 
 @app.route('/')
@@ -271,6 +295,14 @@ def api_update_config():
         new_config = request.json
         if not new_config:
             return jsonify({'error': 'No configuration provided'}), 400
+
+        # Validate regex patterns before saving (ReDoS protection)
+        for img in new_config.get('images', []):
+            if 'regex' in img:
+                try:
+                    _validate_regex(img['regex'])
+                except ValueError as e:
+                    return jsonify({'error': str(e)}), 400
 
         # Validate against schema before saving
         jsonschema.validate(new_config, CONFIG_SCHEMA)
@@ -377,6 +409,9 @@ def api_daemon():
 
         # Get interval from request or use default
         daemon_interval = data.get('interval', 3600)
+        if not isinstance(daemon_interval, (int, float)) or daemon_interval < 60:
+            return jsonify({'error': 'Interval must be at least 60 seconds'}), 400
+        daemon_interval = int(daemon_interval)
 
         daemon_running = True
         daemon_stop_event.clear()
