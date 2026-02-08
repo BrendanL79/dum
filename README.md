@@ -4,6 +4,16 @@
 
 Docker image auto-updater that tracks version-specific tags via regex patterns, compares manifest digests to detect updates, and recreates containers preserving all settings with rollback on failure.
 
+## Why not just use Watchtower or Diun?
+
+- **Version-aware updates, not just "latest" roulette.** Watchtower watches a fixed tag — if your container runs `nginx:latest`, it pulls whatever `latest` points to, including breaking major-version jumps. ium uses regex patterns to find the *specific version tag* (e.g., `4.3.2.7890-ls225`) that matches your base tag's digest, so you always know exactly what version is running and updates stay within your defined pattern.
+- **Checks for updates without pulling images.** ium compares manifest digests via lightweight HEAD requests to the registry API. No images are downloaded just to check whether an update exists, saving bandwidth and time — especially across a large image list.
+- **Built-in rollback on failure.** When an auto-update fails (container won't start), ium automatically restores the previous container. Watchtower has no rollback mechanism — a bad update leaves you with a stopped container and no easy way back.
+- **Notification *and* action in one tool.** Diun only notifies you that a new tag exists — you still have to update containers yourself. ium can run in notify-only mode (`auto_update: false`) or handle the full update cycle including pull, recreate, and rollback, per image.
+- **Web UI included.** Neither Watchtower nor Diun ships a built-in web interface. ium includes a real-time Web UI (Socket.IO) for managing images, viewing update status, and triggering checks — no Portainer or external dashboard needed.
+
+**Where the others may suit you better:** Diun has a broader notification ecosystem (Slack, Telegram, Discord, Matrix, and more) and supports Kubernetes/Swarm/Nomad. If you only need notifications across orchestrators, Diun is a good choice. Note that Watchtower was [archived in December 2025](https://github.com/containrrr/watchtower) and is no longer maintained.
+
 ## Quick Start
 
 ```bash
