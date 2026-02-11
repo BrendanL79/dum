@@ -164,6 +164,9 @@ function handleCheckProgress(data) {
         case 'no_update':
             addLog(`  - No update available`, 'info');
             break;
+        case 'check_error':
+            addLog(`  ✗ ${eventData.error}`, 'error');
+            break;
     }
 }
 

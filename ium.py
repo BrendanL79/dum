@@ -427,6 +427,12 @@ class DockerImageUpdater:
             response = requests.head(manifest_url, headers=headers, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
             return response.headers.get('Docker-Content-Digest')
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 404:
+                self.logger.debug(f"Tag not found: {namespace}/{repo}:{tag}")
+            else:
+                self.logger.debug(f"HTTP error getting manifest digest for {namespace}/{repo}:{tag}: {e}")
+            return None
         except requests.RequestException as e:
             self.logger.debug(f"Error getting manifest digest for {namespace}/{repo}:{tag}: {e}")
             return None
@@ -528,8 +534,7 @@ class DockerImageUpdater:
         # Get digest for base tag using HEAD request
         base_digest = self._get_manifest_digest_head(registry, namespace, repo, base_tag, token)
         if not base_digest:
-            self.logger.error(f"Could not get digest for {image}:{base_tag}")
-            return None
+            self.logger.warning(f"Tag '{base_tag}' not found in registry for {image}")
 
         # Get all available tags
         all_tags = self._get_all_tags(registry, namespace, repo, token)
@@ -555,26 +560,41 @@ class DockerImageUpdater:
         # For semver-like tags (v1.2.3), reverse sort puts newest first
         matching_tags.sort(reverse=True)
 
-        # Fetch digests in parallel using HEAD requests
-        def fetch_digest(tag: str) -> Tuple[str, Optional[str]]:
-            digest = self._get_manifest_digest_head(registry, namespace, repo, tag, token)
-            return (tag, digest)
+        # If we have a base digest, try to find a tag with matching digest
+        if base_digest:
+            # Fetch digests in parallel using HEAD requests
+            def fetch_digest(tag: str) -> Tuple[str, Optional[str]]:
+                digest = self._get_manifest_digest_head(registry, namespace, repo, tag, token)
+                return (tag, digest)
 
-        # Use ThreadPoolExecutor for parallel fetching (limit concurrency to be nice to registries)
-        max_workers = min(10, len(matching_tags))
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(fetch_digest, tag): tag for tag in matching_tags}
+            # Use ThreadPoolExecutor for parallel fetching (limit concurrency to be nice to registries)
+            max_workers = min(10, len(matching_tags))
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {executor.submit(fetch_digest, tag): tag for tag in matching_tags}
 
-            for future in as_completed(futures):
-                tag, digest = future.result()
-                if digest == base_digest:
-                    # Found a match - cancel remaining futures and return
-                    for f in futures:
-                        f.cancel()
-                    self.logger.debug(f"Found matching tag {tag} with digest {digest[:16]}...")
-                    return (tag, base_digest)
+                for future in as_completed(futures):
+                    tag, digest = future.result()
+                    if digest == base_digest:
+                        # Found a match - cancel remaining futures and return
+                        for f in futures:
+                            f.cancel()
+                        self.logger.debug(f"Found matching tag {tag} with digest {digest[:16]}...")
+                        return (tag, base_digest)
 
-        self.logger.warning(f"No tag matching pattern '{regex_pattern}' found with same digest as {base_tag}")
+            self.logger.warning(f"No tag matching pattern '{regex_pattern}' found with same digest as {base_tag}")
+
+        # Fallback: use the latest matching tag when base tag is missing or
+        # its digest doesn't match any version tag
+        latest_tag = matching_tags[0]
+        latest_digest = self._get_manifest_digest_head(registry, namespace, repo, latest_tag, token)
+        if latest_digest:
+            self.logger.info(
+                f"Using latest matching tag '{latest_tag}' for {image}"
+                f" (base tag '{base_tag}' could not be resolved by digest)"
+            )
+            return (latest_tag, latest_digest)
+
+        self.logger.error(f"Could not get digest for latest matching tag {image}:{latest_tag}")
         return None
         
     def _pull_image(self, image: str, tag: str) -> bool:
@@ -1071,138 +1091,147 @@ class DockerImageUpdater:
             
             # Find matching tag for current base tag
             result = self.find_matching_tag(image, base_tag, regex, registry)
-            
-            if result:
-                matching_tag, digest = result
-                self.logger.info(f"Base tag '{base_tag}' corresponds to: {matching_tag}")
-                self.logger.debug(f"Digest: {digest}")
-                
-                # Check if this is different from our saved state
-                saved_state = self.state.get(image)
 
-                # Discover all containers using this image
-                containers = self._get_containers_for_image(image)
+            if not result:
+                self.logger.warning(f"Could not determine version for {image}:{base_tag}")
+                if progress_callback:
+                    progress_callback('check_error', {
+                        'image': image,
+                        'base_tag': base_tag,
+                        'error': f"Could not determine version for {image}:{base_tag} - no matching tags found"
+                    })
+                continue
 
-                if not saved_state or saved_state.digest != digest:
-                    # Determine current version (from saved state or first container)
-                    old_tag = saved_state.tag if saved_state else None
-                    if not old_tag and containers:
-                        old_tag = self._get_container_current_tag(containers[0]['name'], image, regex)
-                    if not old_tag:
-                        old_tag = 'unknown'
+            matching_tag, digest = result
+            self.logger.info(f"Base tag '{base_tag}' corresponds to: {matching_tag}")
+            self.logger.debug(f"Digest: {digest}")
 
-                    # Only report update if tags are actually different
-                    if old_tag != matching_tag:
-                        self.logger.info(f"UPDATE AVAILABLE: {old_tag} -> {matching_tag}")
+            # Check if this is different from our saved state
+            saved_state = self.state.get(image)
 
-                        update_info = {
-                            'image': image,
-                            'base_tag': base_tag,
-                            'old_tag': old_tag,
-                            'new_tag': matching_tag,
-                            'digest': digest,
-                            'auto_update': auto_update
-                        }
-                        updates_found.append(update_info)
+            # Discover all containers using this image
+            containers = self._get_containers_for_image(image)
 
-                        # Emit progress: update found
-                        if progress_callback:
-                            progress_callback('update_found', update_info)
+            if not saved_state or saved_state.digest != digest:
+                # Determine current version (from saved state or first container)
+                old_tag = saved_state.tag if saved_state else None
+                if not old_tag and containers:
+                    old_tag = self._get_container_current_tag(containers[0]['name'], image, regex)
+                if not old_tag:
+                    old_tag = 'unknown'
 
-                        update_ok = True
-                        if auto_update:
-                            # Pull the new images
-                            if self._pull_image(image, base_tag):
-                                self._pull_image(image, matching_tag)
+                # Only report update if tags are actually different
+                if old_tag != matching_tag:
+                    self.logger.info(f"UPDATE AVAILABLE: {old_tag} -> {matching_tag}")
 
-                                if containers:
-                                    # Update all discovered containers
-                                    container_names = [c['name'] for c in containers]
-                                    self.logger.info(f"Found {len(containers)} container(s) using {image}: {', '.join(container_names)}")
-                                    update_results = self._update_containers(container_names, image, matching_tag)
+                    update_info = {
+                        'image': image,
+                        'base_tag': base_tag,
+                        'old_tag': old_tag,
+                        'new_tag': matching_tag,
+                        'digest': digest,
+                        'auto_update': auto_update
+                    }
+                    updates_found.append(update_info)
 
-                                    # Success if any container updated
-                                    update_ok = any(update_results.values()) if update_results else True
-                                else:
-                                    # No containers - just image update
-                                    self.logger.info(f"No containers found for {image}, image updated only")
-                                    update_ok = True
-
-                                # Only cleanup old images after a successful update,
-                                # otherwise we may remove tags still in use
-                                if update_ok and cleanup:
-                                    self._cleanup_old_images(image, keep_versions)
-                            else:
-                                update_ok = False
-
-                        # Update state: always for non-auto (to prevent
-                        # re-reporting), but only on success for auto_update
-                        # so the update is retried next cycle
-                        if not auto_update or update_ok:
-                            self.state[image] = ImageState(
-                                base_tag=base_tag,
-                                tag=matching_tag,
-                                digest=digest,
-                                last_updated=datetime.now().isoformat()
-                            )
-                    else:
-                        # Digest changed but tag is the same — image was
-                        # rebuilt under the same tag.  Treat as an update.
-                        self.logger.info(f"IMAGE REBUILT: {matching_tag} (new digest)")
-
-                        update_info = {
-                            'image': image,
-                            'base_tag': base_tag,
-                            'old_tag': matching_tag,
-                            'new_tag': matching_tag,
-                            'digest': digest,
-                            'auto_update': auto_update
-                        }
-                        updates_found.append(update_info)
-
-                        # Emit progress: image rebuilt
-                        if progress_callback:
-                            progress_callback('image_rebuilt', {
-                                'image': image,
-                                'tag': matching_tag
-                            })
-
-                        update_ok = True
-                        if auto_update:
-                            # Pull the fresh image
-                            if self._pull_image(image, base_tag):
-                                self._pull_image(image, matching_tag)
-
-                                if containers:
-                                    container_names = [c['name'] for c in containers]
-                                    self.logger.info(f"Found {len(containers)} container(s) using {image}: {', '.join(container_names)}")
-                                    update_results = self._update_containers(container_names, image, matching_tag)
-                                    update_ok = any(update_results.values()) if update_results else True
-                                else:
-                                    self.logger.info(f"No containers found for {image}, image updated only")
-                                    update_ok = True
-
-                                if update_ok and cleanup:
-                                    self._cleanup_old_images(image, keep_versions)
-                            else:
-                                update_ok = False
-
-                        # Update state
-                        if not auto_update or update_ok:
-                            self.state[image] = ImageState(
-                                base_tag=base_tag,
-                                tag=matching_tag,
-                                digest=digest,
-                                last_updated=datetime.now().isoformat()
-                            )
-                else:
-                    self.logger.info("No update available")
-                    # Emit progress: no update
+                    # Emit progress: update found
                     if progress_callback:
-                        progress_callback('no_update', {
+                        progress_callback('update_found', update_info)
+
+                    update_ok = True
+                    if auto_update:
+                        # Pull the new images
+                        if self._pull_image(image, base_tag):
+                            self._pull_image(image, matching_tag)
+
+                            if containers:
+                                # Update all discovered containers
+                                container_names = [c['name'] for c in containers]
+                                self.logger.info(f"Found {len(containers)} container(s) using {image}: {', '.join(container_names)}")
+                                update_results = self._update_containers(container_names, image, matching_tag)
+
+                                # Success if any container updated
+                                update_ok = any(update_results.values()) if update_results else True
+                            else:
+                                # No containers - just image update
+                                self.logger.info(f"No containers found for {image}, image updated only")
+                                update_ok = True
+
+                            # Only cleanup old images after a successful update,
+                            # otherwise we may remove tags still in use
+                            if update_ok and cleanup:
+                                self._cleanup_old_images(image, keep_versions)
+                        else:
+                            update_ok = False
+
+                    # Update state: always for non-auto (to prevent
+                    # re-reporting), but only on success for auto_update
+                    # so the update is retried next cycle
+                    if not auto_update or update_ok:
+                        self.state[image] = ImageState(
+                            base_tag=base_tag,
+                            tag=matching_tag,
+                            digest=digest,
+                            last_updated=datetime.now().isoformat()
+                        )
+                else:
+                    # Digest changed but tag is the same — image was
+                    # rebuilt under the same tag.  Treat as an update.
+                    self.logger.info(f"IMAGE REBUILT: {matching_tag} (new digest)")
+
+                    update_info = {
+                        'image': image,
+                        'base_tag': base_tag,
+                        'old_tag': matching_tag,
+                        'new_tag': matching_tag,
+                        'digest': digest,
+                        'auto_update': auto_update
+                    }
+                    updates_found.append(update_info)
+
+                    # Emit progress: image rebuilt
+                    if progress_callback:
+                        progress_callback('image_rebuilt', {
                             'image': image,
-                            'base_tag': base_tag
+                            'tag': matching_tag
                         })
+
+                    update_ok = True
+                    if auto_update:
+                        # Pull the fresh image
+                        if self._pull_image(image, base_tag):
+                            self._pull_image(image, matching_tag)
+
+                            if containers:
+                                container_names = [c['name'] for c in containers]
+                                self.logger.info(f"Found {len(containers)} container(s) using {image}: {', '.join(container_names)}")
+                                update_results = self._update_containers(container_names, image, matching_tag)
+                                update_ok = any(update_results.values()) if update_results else True
+                            else:
+                                self.logger.info(f"No containers found for {image}, image updated only")
+                                update_ok = True
+
+                            if update_ok and cleanup:
+                                self._cleanup_old_images(image, keep_versions)
+                        else:
+                            update_ok = False
+
+                    # Update state
+                    if not auto_update or update_ok:
+                        self.state[image] = ImageState(
+                            base_tag=base_tag,
+                            tag=matching_tag,
+                            digest=digest,
+                            last_updated=datetime.now().isoformat()
+                        )
+            else:
+                self.logger.info("No update available")
+                # Emit progress: no update
+                if progress_callback:
+                    progress_callback('no_update', {
+                        'image': image,
+                        'base_tag': base_tag
+                    })
                     
         # Save state
         self._save_state()
