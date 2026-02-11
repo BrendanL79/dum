@@ -119,6 +119,28 @@ When you're ready to enable actual updates:
    docker-compose --profile prod up -d
    ```
 
+## Updating IUM
+
+To update IUM to a newer version on your NAS:
+
+```bash
+cd /volume1/docker/docker-updater
+
+# Stop the running containers
+docker-compose down
+
+# Replace the application files with the new version
+# (ium.py, webui.py, Dockerfile, Dockerfile.webui,
+# requirements.txt, requirements-webui.txt,
+# docker-compose.yml, static/, templates/)
+
+# Rebuild and restart
+docker-compose build
+docker-compose up -d
+```
+
+Your `config/` and `state/` directories are preserved across updates since they are volume-mounted.
+
 ## Safety Features
 
 - Dry-run mode by default
