@@ -72,7 +72,7 @@ jobs:
         uses: peter-evans/dockerhub-description@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
           repository: brendanl79/ium
           short-description: "Docker image auto-updater with version-aware tag tracking, digest comparison, and Web UI"
 
