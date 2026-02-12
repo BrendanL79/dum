@@ -11,7 +11,7 @@ __version__ = "1.0.0"
 
 import json
 import re
-import subprocess
+import socket as _socket
 import sys
 import time
 import logging
@@ -27,6 +27,9 @@ import os
 import platform
 import requests
 import jsonschema
+from urllib3.connection import HTTPConnection as _HTTPConnection
+from urllib3.connectionpool import HTTPConnectionPool as _HTTPConnectionPool
+from requests.adapters import HTTPAdapter as _HTTPAdapter
 
 from pattern_utils import detect_tag_patterns, detect_base_tags
 
@@ -50,6 +53,7 @@ MANIFEST_ACCEPT_HEADER = (
     "application/vnd.oci.image.index.v1+json,"
     "application/vnd.oci.image.manifest.v1+json"
 )
+DOCKER_SOCKET_PATH = os.environ.get('DOCKER_SOCKET', '/var/run/docker.sock')
 
 # Configuration schema
 CONFIG_SCHEMA = {
@@ -75,6 +79,77 @@ CONFIG_SCHEMA = {
     "required": ["images"]
 }
 
+
+# ---------------------------------------------------------------------------
+# Docker Engine socket client (replaces docker CLI subprocess calls)
+# ---------------------------------------------------------------------------
+
+class _UnixSocketConnection(_HTTPConnection):
+    """HTTPConnection that connects via a Unix domain socket."""
+
+    def __init__(self, socket_path: str):
+        super().__init__('localhost')
+        self._socket_path = socket_path
+
+    def connect(self):
+        sock = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+        sock.connect(self._socket_path)
+        self.sock = sock
+
+
+class _UnixSocketPool(_HTTPConnectionPool):
+    """Connection pool backed by a Unix domain socket."""
+
+    def __init__(self, socket_path: str):
+        super().__init__('localhost')
+        self._socket_path = socket_path
+
+    def _new_conn(self):
+        return _UnixSocketConnection(self._socket_path)
+
+
+class _UnixSocketAdapter(_HTTPAdapter):
+    """requests adapter that routes all requests through a Unix socket."""
+
+    def __init__(self, socket_path: str):
+        self._socket_path = socket_path
+        super().__init__()
+
+    def get_connection(self, url: str, proxies=None):
+        return _UnixSocketPool(self._socket_path)
+
+    # Needed in requests >= 2.32 / urllib3 >= 2.x
+    def get_connection_with_tls_context(self, request, verify, proxies=None, cert=None):
+        return _UnixSocketPool(self._socket_path)
+
+
+class DockerClient:
+    """Minimal Docker Engine API v1.41 client over the Unix socket."""
+
+    def __init__(self, socket_path: str = DOCKER_SOCKET_PATH):
+        self._session = requests.Session()
+        self._session.mount('http+unix://', _UnixSocketAdapter(socket_path))
+
+    def _url(self, path: str) -> str:
+        return f'http+unix://docker{path}'
+
+    def get(self, path: str, **kwargs) -> requests.Response:
+        r = self._session.get(self._url(path), timeout=REQUEST_TIMEOUT, **kwargs)
+        r.raise_for_status()
+        return r
+
+    def post(self, path: str, **kwargs) -> requests.Response:
+        r = self._session.post(self._url(path), timeout=REQUEST_TIMEOUT, **kwargs)
+        r.raise_for_status()
+        return r
+
+    def delete(self, path: str, **kwargs) -> requests.Response:
+        r = self._session.delete(self._url(path), timeout=REQUEST_TIMEOUT, **kwargs)
+        r.raise_for_status()
+        return r
+
+
+# ---------------------------------------------------------------------------
 
 def _validate_regex(pattern: str, timeout: float = 2.0) -> re.Pattern:
     """Compile a regex pattern and test it against a short string to detect ReDoS.
@@ -128,7 +203,7 @@ class DockerImageUpdater:
                  dry_run: bool = False, log_level: str = "INFO"):
         """
         Initialize the Docker Image Updater.
-        
+
         Args:
             config_file: Path to JSON configuration file
             state_file: Path to store state between runs
@@ -138,20 +213,23 @@ class DockerImageUpdater:
         self.config_file = Path(config_file)
         self.state_file = Path(state_file)
         self.dry_run = dry_run
-        
+
         # Setup logging
         self.logger = self._setup_logging(log_level)
-        
+
+        # Docker Engine API client
+        self._docker = DockerClient()
+
         # Load configuration and state
         self.compiled_patterns = {}  # Cache for compiled regex patterns
         self.config = self._load_config()
         self.state = self._load_state()
-        
+
     def _setup_logging(self, level: str) -> logging.Logger:
         """Setup logging configuration."""
         logger = logging.getLogger('DockerImageUpdater')
         logger.setLevel(getattr(logging, level.upper()))
-        
+
         if not logger.handlers:
             handler = logging.StreamHandler()
             formatter = logging.Formatter(
@@ -159,25 +237,25 @@ class DockerImageUpdater:
             )
             handler.setFormatter(formatter)
             logger.addHandler(handler)
-            
+
         return logger
-        
+
     def _load_config(self) -> Dict[str, Any]:
         """Load and validate configuration from JSON file."""
         try:
             with open(self.config_file, 'r') as f:
                 config = json.load(f)
-                
+
             # Validate against schema
             jsonschema.validate(config, CONFIG_SCHEMA)
-            
+
             # Validate and cache regex patterns
             for image_config in config.get('images', []):
                 regex_pattern = image_config['regex']
                 self.compiled_patterns[regex_pattern] = _validate_regex(regex_pattern)
-                    
+
             return config
-            
+
         except FileNotFoundError:
             self.logger.error(f"Config file {self.config_file} not found")
             raise
@@ -187,7 +265,7 @@ class DockerImageUpdater:
         except jsonschema.ValidationError as e:
             self.logger.error(f"Configuration validation failed: {e}")
             raise
-            
+
     @contextmanager
     def _file_lock(self, file_path: Path):
         """Context manager for file locking."""
@@ -219,17 +297,17 @@ class DockerImageUpdater:
                 lock_file.unlink()
             except (OSError, FileNotFoundError):
                 pass
-                
+
     def _load_state(self) -> Dict[str, ImageState]:
         """Load previous state from file with validation."""
         try:
             if not self.state_file.exists():
                 return {}
-                
+
             with self._file_lock(self.state_file):
                 with open(self.state_file, 'r') as f:
                     data = json.load(f)
-                    
+
             # Convert to ImageState objects
             state = {}
             for image, image_data in data.items():
@@ -237,42 +315,42 @@ class DockerImageUpdater:
                     state[image] = ImageState(**image_data)
                 except (TypeError, KeyError) as e:
                     self.logger.warning(f"Invalid state data for {image}: {e}")
-                    
+
             return state
-            
+
         except json.JSONDecodeError as e:
             self.logger.warning(f"Error parsing state file, starting fresh: {e}")
             return {}
         except Exception as e:
             self.logger.warning(f"Error loading state: {e}")
             return {}
-            
+
     def _save_state(self):
         """Save current state to file with locking."""
         if self.dry_run:
             self.logger.info("[DRY RUN] Would save state to file")
             return
-            
+
         try:
             # Convert ImageState objects to dicts
             state_dict = {
-                image: asdict(state) 
+                image: asdict(state)
                 for image, state in self.state.items()
             }
-            
+
             with self._file_lock(self.state_file):
                 # Write to temp file first
                 temp_file = self.state_file.with_suffix('.tmp')
                 with open(temp_file, 'w') as f:
                     json.dump(state_dict, f, indent=2)
-                    
+
                 # Atomic rename
                 temp_file.replace(self.state_file)
-                
+
         except Exception as e:
             self.logger.error(f"Error saving state: {e}")
             raise
-            
+
     def _parse_image_reference(self, image: str) -> Tuple[str, str, str]:
         """
         Parse image reference into registry, namespace, and repository.
@@ -311,7 +389,7 @@ class DockerImageUpdater:
             repo = remaining
 
         return registry, namespace, repo
-        
+
     def _get_docker_token(self, registry: str, namespace: str, repo: str) -> Optional[str]:
         """
         Get authentication token for Docker registry.
@@ -333,7 +411,7 @@ class DockerImageUpdater:
         else:
             # Generic registry auth (may need customization)
             auth_url = f"https://{registry}/v2/auth?service={registry}&scope=repository:{namespace}/{repo}:pull"
-            
+
         try:
             response = requests.get(auth_url, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
@@ -341,37 +419,37 @@ class DockerImageUpdater:
         except requests.RequestException as e:
             self.logger.error(f"Error getting token for {namespace}/{repo}: {e}")
             return None
-            
-    def _get_manifest_digest(self, registry: str, namespace: str, repo: str, 
+
+    def _get_manifest_digest(self, registry: str, namespace: str, repo: str,
                            tag: str, token: Optional[str], platform: Optional[str] = None) -> Optional[str]:
         """
         Get manifest digest for a specific image:tag.
-        
+
         Args:
             registry: Registry hostname
-            namespace: Image namespace  
+            namespace: Image namespace
             repo: Repository name
             tag: Tag name
             token: Authentication token
             platform: Platform (e.g., 'linux/amd64')
-            
+
         Returns:
             Manifest digest or None
         """
         manifest_url = f"https://{registry}/v2/{namespace}/{repo}/manifests/{tag}"
-        
+
         headers = {
             'Accept': MANIFEST_ACCEPT_HEADER
         }
         if token:
             headers['Authorization'] = f'Bearer {token}'
-            
+
         try:
             response = requests.get(manifest_url, headers=headers, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
-            
+
             content_type = response.headers.get('Content-Type', '')
-            
+
             # Handle manifest lists for multi-arch support
             if 'manifest.list' in content_type or 'image.index' in content_type:
                 manifest_list = response.json()
@@ -388,10 +466,10 @@ class DockerImageUpdater:
                 # Return first manifest if no platform specified
                 if manifests:
                     return manifests[0].get('digest')
-                    
+
             # Single manifest
             return response.headers.get('Docker-Content-Digest')
-            
+
         except requests.RequestException as e:
             self.logger.error(f"Error getting manifest for {namespace}/{repo}:{tag}: {e}")
             return None
@@ -499,7 +577,7 @@ class DockerImageUpdater:
         # Sort by push date ascending — last element = most recently pushed
         tag_dates.sort(key=lambda x: x[1])
         return [name for name, _ in tag_dates]
-            
+
     def find_matching_tag(self, image: str, base_tag: str, regex_pattern: str,
                          registry_override: Optional[str] = None) -> Optional[Tuple[str, str]]:
         """
@@ -576,95 +654,100 @@ class DockerImageUpdater:
 
         self.logger.warning(f"No tag matching pattern '{regex_pattern}' found with same digest as {base_tag}")
         return None
-        
+
     def _pull_image(self, image: str, tag: str) -> bool:
         """
-        Pull a Docker image.
-        
+        Pull a Docker image via the Engine API.
+
         Args:
             image: Image name
             tag: Tag to pull
-            
+
         Returns:
             True if successful, False otherwise
         """
         full_image = f"{image}:{tag}"
-        
+
         if self.dry_run:
             self.logger.info(f"[DRY RUN] Would pull {full_image}")
             return True
-            
+
         self.logger.info(f"Pulling {full_image}...")
-        
+
         try:
-            # Use subprocess with proper argument handling
-            subprocess.run(
-                ['docker', 'pull', full_image],
-                capture_output=True,
-                text=True,
-                check=True
+            response = self._docker._session.post(
+                self._docker._url('/images/create'),
+                params={'fromImage': image, 'tag': tag},
+                stream=True,
+                timeout=300,  # image pulls can take a while
             )
+            response.raise_for_status()
+
+            # Consume the stream; detect errors reported in the JSON event stream
+            for line in response.iter_lines():
+                if line:
+                    try:
+                        event = json.loads(line)
+                        if 'error' in event:
+                            self.logger.error(f"Error pulling {full_image}: {event['error']}")
+                            return False
+                    except json.JSONDecodeError:
+                        pass
+
             self.logger.info(f"Successfully pulled {full_image}")
             return True
-        except subprocess.CalledProcessError as e:
-            self.logger.error(f"Error pulling {full_image}: {e.stderr}")
+        except requests.RequestException as e:
+            self.logger.error(f"Error pulling {full_image}: {e}")
             return False
-            
+
     def _get_container_config(self, container_name: str) -> Optional[Dict[str, Any]]:
-        """Get full container configuration."""
+        """Get full container configuration via the Engine API."""
         try:
-            result = subprocess.run(
-                ['docker', 'inspect', container_name],
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            return json.loads(result.stdout)[0]
-        except subprocess.CalledProcessError as e:
-            stderr = (e.stderr or '').strip()
-            self.logger.error(
-                f"Error inspecting container '{container_name}': {stderr or e}. "
-                f"Check that the container_name in config matches a running container (docker ps -a --format '{{{{.Names}}}}')"
-            )
+            response = self._docker.get(f'/containers/{container_name}/json')
+            return response.json()
+        except requests.HTTPError as e:
+            status = e.response.status_code if e.response is not None else None
+            if status == 404:
+                self.logger.error(
+                    f"Container '{container_name}' not found. "
+                    f"Check that container_name in config matches an existing container."
+                )
+            else:
+                self.logger.error(f"Error inspecting container '{container_name}': {e}")
             return None
-        except (json.JSONDecodeError, IndexError) as e:
+        except requests.RequestException as e:
+            self.logger.error(f"Error inspecting container '{container_name}': {e}")
+            return None
+        except (json.JSONDecodeError, KeyError) as e:
             self.logger.error(f"Error parsing container config for '{container_name}': {e}")
             return None
 
     def _get_containers_for_image(self, image: str) -> List[Dict[str, str]]:
-        """Get all containers (running or stopped) using a specific image.
+        """Get all containers (running or stopped) using a specific image via the Engine API.
 
         Returns:
             List of dicts with keys: name, id, state, image_ref
         """
         try:
-            result = subprocess.run(
-                ['docker', 'ps', '-a', '--format', 'json'],
-                capture_output=True,
-                text=True,
-                check=True
-            )
+            response = self._docker.get('/containers/json', params={'all': '1'})
+            all_containers = response.json()
 
             containers = []
             all_images = []
-            for line in result.stdout.strip().split('\n'):
-                if not line:
-                    continue
-                try:
-                    container = json.loads(line)
-                    container_image = container.get('Image', '')
-                    all_images.append(container_image)
+            for container in all_containers:
+                container_image = container.get('Image', '')
+                all_images.append(container_image)
 
-                    if self._image_matches(image, container_image):
-                        containers.append({
-                            'name': container.get('Names', ''),
-                            'id': container.get('ID', ''),
-                            'state': container.get('State', ''),
-                            'image_ref': container_image
-                        })
-                except json.JSONDecodeError:
-                    self.logger.debug(f"Skipping non-JSON docker ps line: {line!r}")
-                    continue
+                if self._image_matches(image, container_image):
+                    # API returns Names as a list with leading slashes, e.g. ["/mycontainer"]
+                    names = container.get('Names') or []
+                    name = names[0].lstrip('/') if names else ''
+                    containers.append({
+                        'name': name,
+                        'id': container.get('Id', ''),
+                        'state': container.get('State', ''),
+                        'image_ref': container_image,
+                    })
 
             if not containers and all_images:
                 normalized = self._normalize_image_ref(image)
@@ -675,7 +758,7 @@ class DockerImageUpdater:
 
             return containers
 
-        except subprocess.CalledProcessError as e:
+        except requests.RequestException as e:
             self.logger.error(f"Failed to list containers: {e}")
             return []
 
@@ -742,7 +825,7 @@ class DockerImageUpdater:
                 self.logger.debug(f"Container {container_name} not found or no config")
                 return None
 
-            # Get the image ID (sha256) from the container
+            # Full sha256 image ID from the container (e.g. "sha256:abc123...")
             image_id = container_info.get('Image', '')
             if not image_id:
                 self.logger.debug(f"No image ID found for container {container_name}")
@@ -754,28 +837,21 @@ class DockerImageUpdater:
                 self.logger.debug(f"Pattern not found in cache: '{regex}'")
                 return None
 
-            # Query docker images to find all tags for this image name
-            result = subprocess.run(
-                ['docker', 'images', image, '--format', '{{.Tag}} {{.ID}}'],
-                capture_output=True,
-                text=True
+            # List locally-available images for this repository
+            response = self._docker.get(
+                '/images/json',
+                params={'filters': json.dumps({'reference': [image]})},
             )
+            local_images = response.json()
 
-            if result.returncode != 0:
-                self.logger.debug(f"Failed to get image tags for {image}")
-                return None
-
-            # Extract short ID from container's image (first 12 chars after sha256:)
-            short_id = image_id.replace('sha256:', '')[:12]
-
-            # Find tags that match both the image ID and regex pattern
-            for line in result.stdout.strip().split('\n'):
-                if not line:
+            # Find an image whose ID matches the container's image and whose tag matches regex
+            for img in local_images:
+                if img.get('Id') != image_id:
                     continue
-                parts = line.split()
-                if len(parts) >= 2:
-                    tag, tag_id = parts[0], parts[1]
-                    if tag_id == short_id and pattern.match(tag):
+                for repo_tag in img.get('RepoTags') or []:
+                    # repo_tag is "image:tag" or "registry/image:tag"
+                    tag = repo_tag.rsplit(':', 1)[-1] if ':' in repo_tag else ''
+                    if tag and pattern.match(tag):
                         self.logger.debug(f"Found matching tag for {container_name}: {tag}")
                         return tag
 
@@ -787,60 +863,95 @@ class DockerImageUpdater:
 
     def _update_container(self, container_name: str, image: str, tag: str) -> bool:
         """
-        Update a running container with a new image.
-        
+        Update a running container with a new image via the Engine API.
+
         Args:
             container_name: Name of the container to update
             image: Image name
             tag: Tag to use
-            
+
         Returns:
             True if successful, False otherwise
         """
         full_image = f"{image}:{tag}"
-        
+
         if self.dry_run:
             self.logger.info(f"[DRY RUN] Would update container {container_name} with image {full_image}")
             return True
-            
+
         # Get current container configuration
         container_info = self._get_container_config(container_name)
         if not container_info:
             return False
-            
+
+        backup_name = f"{container_name}_backup_{int(time.time())}"
+
         try:
-            # Build docker run command preserving all settings
-            run_cmd = self._build_run_command(container_name, full_image, container_info)
+            # Build container create body preserving all settings
+            body = self._build_container_create_body(full_image, container_info)
 
             # Stop the container
             self.logger.info(f"Stopping container {container_name}...")
-            subprocess.run(['docker', 'stop', container_name], check=True)
-            
+            self._docker.post(f'/containers/{container_name}/stop')
+
             # Rename old container as backup
-            backup_name = f"{container_name}_backup_{int(time.time())}"
             self.logger.info(f"Renaming old container to {backup_name}")
-            subprocess.run(['docker', 'rename', container_name, backup_name], check=True)
-            
+            self._docker.post(
+                f'/containers/{container_name}/rename',
+                params={'name': backup_name},
+            )
+
             # Create new container
             self.logger.info(f"Creating new container {container_name}...")
-            result = subprocess.run(run_cmd, capture_output=True, text=True)
-            
-            if result.returncode != 0:
+            try:
+                create_resp = self._docker._session.post(
+                    self._docker._url('/containers/create'),
+                    params={'name': container_name},
+                    json=body,
+                    timeout=REQUEST_TIMEOUT,
+                )
+                create_resp.raise_for_status()
+                new_id = create_resp.json()['Id']
+                self._docker.post(f'/containers/{new_id}/start')
+            except requests.RequestException as create_err:
                 # Rollback on failure
-                self.logger.error(f"Failed to create new container: {result.stderr}")
+                self.logger.error(f"Failed to create new container: {create_err}")
                 self.logger.info("Rolling back...")
-                subprocess.run(['docker', 'rename', backup_name, container_name], check=False)
-                subprocess.run(['docker', 'start', container_name], check=False)
+                try:
+                    self._docker.post(
+                        f'/containers/{backup_name}/rename',
+                        params={'name': container_name},
+                    )
+                    self._docker.post(f'/containers/{container_name}/start')
+                except requests.RequestException:
+                    pass
                 return False
-                
+
+            # Connect to additional networks (non-fatal if this fails)
+            network_mode = (container_info.get('HostConfig') or {}).get('NetworkMode', '')
+            is_container_network = network_mode.startswith('container:')
+            if not is_container_network:
+                networks = (container_info.get('NetworkSettings') or {}).get('Networks') or {}
+                for network, endpoint_config in networks.items():
+                    if network != network_mode:
+                        try:
+                            self._docker.post(
+                                f'/networks/{network}/connect',
+                                json={'Container': new_id, 'EndpointConfig': endpoint_config},
+                            )
+                        except requests.RequestException as e:
+                            self.logger.warning(
+                                f"Could not connect {container_name} to network {network}: {e}"
+                            )
+
             # Success - remove old container
             self.logger.info(f"Removing old container {backup_name}")
-            subprocess.run(['docker', 'rm', backup_name], check=True)
-            
+            self._docker.delete(f'/containers/{backup_name}')
+
             self.logger.info(f"Successfully updated container {container_name}")
             return True
-            
-        except subprocess.CalledProcessError as e:
+
+        except requests.RequestException as e:
             self.logger.error(f"Error updating container: {e}")
             return False
 
@@ -871,11 +982,9 @@ class DockerImageUpdater:
 
         return results
 
-    def _build_run_command(self, container_name: str, image: str, 
-                          container_info: Dict[str, Any]) -> List[str]:
-        """Build docker run command preserving container settings."""
-        cmd = ['docker', 'run', '-d', '--name', container_name]
-        
+    def _build_container_create_body(self, image: str,
+                                     container_info: Dict[str, Any]) -> Dict[str, Any]:
+        """Build Docker Engine API container-create request body from an existing container's config."""
         config = container_info['Config']
         host_config = container_info['HostConfig']
 
@@ -885,46 +994,51 @@ class DockerImageUpdater:
         is_container_network = network_mode.startswith('container:')
         shares_network_namespace = is_host_network or is_container_network
 
-        # Restart policy
-        restart_policy = host_config.get('RestartPolicy', {})
-        if restart_policy.get('Name'):
-            if restart_policy['Name'] == 'on-failure':
-                cmd.extend(['--restart', f"on-failure:{restart_policy.get('MaximumRetryCount', 0)}"])
-            else:
-                cmd.extend(['--restart', restart_policy['Name']])
+        body: Dict[str, Any] = {'Image': image}
 
         # Hostname (not allowed with host or container: network modes)
         if not shares_network_namespace:
             if config.get('Hostname') and config['Hostname'] != container_info['Id'][:12]:
-                cmd.extend(['--hostname', config['Hostname']])
+                body['Hostname'] = config['Hostname']
 
         # User
         if config.get('User'):
-            cmd.extend(['--user', config['User']])
+            body['User'] = config['User']
 
         # Working directory
         if config.get('WorkingDir'):
-            cmd.extend(['--workdir', config['WorkingDir']])
+            body['WorkingDir'] = config['WorkingDir']
 
-        # Environment variables
-        for env_var in config.get('Env') or []:
-            # Skip Docker-injected variables
-            if not any(env_var.startswith(prefix) for prefix in ('PATH=', 'HOSTNAME=')):
-                cmd.extend(['-e', env_var])
+        # Environment variables (skip Docker-injected ones)
+        body['Env'] = [
+            e for e in (config.get('Env') or [])
+            if not any(e.startswith(p) for p in ('PATH=', 'HOSTNAME='))
+        ]
 
-        # Port mappings (not applicable with host or container: network modes)
-        if not shares_network_namespace:
-            for container_port, bindings in (host_config.get('PortBindings') or {}).items():
-                if bindings:
-                    for binding in bindings:
-                        host_ip = binding.get('HostIp', '')
-                        host_port = binding.get('HostPort', '')
-                        if host_ip and host_ip != '0.0.0.0':
-                            cmd.extend(['-p', f"{host_ip}:{host_port}:{container_port}"])
-                        else:
-                            cmd.extend(['-p', f"{host_port}:{container_port}"])
-                        
-        # Volume mappings
+        # Command
+        if config.get('Cmd'):
+            body['Cmd'] = config['Cmd']
+
+        # Labels (preserve compose labels for stack membership)
+        body['Labels'] = {
+            k: v for k, v in (config.get('Labels') or {}).items()
+            if k.startswith('com.docker.compose.') or not k.startswith('com.docker.')
+        }
+
+        # HostConfig
+        hc: Dict[str, Any] = {}
+
+        # Restart policy
+        restart_policy = host_config.get('RestartPolicy', {})
+        if restart_policy.get('Name'):
+            hc['RestartPolicy'] = restart_policy
+
+        # Port bindings (not applicable with host or container: network modes)
+        if not shares_network_namespace and host_config.get('PortBindings'):
+            hc['PortBindings'] = host_config['PortBindings']
+
+        # Volume/bind mounts
+        binds = []
         for mount in container_info.get('Mounts') or []:
             if mount['Type'] == 'bind':
                 source = mount['Source']
@@ -932,107 +1046,92 @@ class DockerImageUpdater:
                 source = mount['Name']
             else:
                 continue
-
-            mount_str = f"{source}:{mount['Destination']}"
+            bind_str = f"{source}:{mount['Destination']}"
             if mount.get('Mode'):
-                mount_str += f":{mount['Mode']}"
-            cmd.extend(['-v', mount_str])
-                
+                bind_str += f":{mount['Mode']}"
+            binds.append(bind_str)
+        if binds:
+            hc['Binds'] = binds
+
         # Network mode
         if network_mode and network_mode != 'default':
-            cmd.extend(['--network', network_mode])
+            hc['NetworkMode'] = network_mode
 
-        # Additional networks (not applicable with container: network mode)
-        if not is_container_network:
-            for network in ((container_info.get('NetworkSettings') or {}).get('Networks') or {}).keys():
-                if network != network_mode:
-                    cmd.extend(['--network', network])
-                
         # Privileged
         if host_config.get('Privileged'):
-            cmd.append('--privileged')
-            
+            hc['Privileged'] = True
+
         # Capabilities
-        for cap in host_config.get('CapAdd') or []:
-            cmd.extend(['--cap-add', cap])
-        for cap in host_config.get('CapDrop') or []:
-            cmd.extend(['--cap-drop', cap])
+        if host_config.get('CapAdd'):
+            hc['CapAdd'] = host_config['CapAdd']
+        if host_config.get('CapDrop'):
+            hc['CapDrop'] = host_config['CapDrop']
 
         # Devices
-        for device in host_config.get('Devices') or []:
-            device_str = device['PathOnHost']
-            if device.get('PathInContainer'):
-                device_str += f":{device['PathInContainer']}"
-            if device.get('CgroupPermissions'):
-                device_str += f":{device['CgroupPermissions']}"
-            cmd.extend(['--device', device_str])
-            
+        if host_config.get('Devices'):
+            hc['Devices'] = host_config['Devices']
+
         # Memory limits
         if host_config.get('Memory'):
-            cmd.extend(['-m', str(host_config['Memory'])])
-            
+            hc['Memory'] = host_config['Memory']
+
         # CPU limits
         if host_config.get('CpuShares'):
-            cmd.extend(['--cpu-shares', str(host_config['CpuShares'])])
+            hc['CpuShares'] = host_config['CpuShares']
         if host_config.get('CpuQuota'):
-            cmd.extend(['--cpu-quota', str(host_config['CpuQuota'])])
-            
-        # Labels (preserve compose labels for stack membership)
-        for key, value in (config.get('Labels') or {}).items():
-            if key.startswith('com.docker.compose.'):
-                cmd.extend(['--label', f"{key}={value}"])
-            elif not key.startswith('com.docker.'):
-                cmd.extend(['--label', f"{key}={value}"])
+            hc['CpuQuota'] = host_config['CpuQuota']
 
         # Security options
-        for opt in host_config.get('SecurityOpt') or []:
-            cmd.extend(['--security-opt', opt])
-            
+        if host_config.get('SecurityOpt'):
+            hc['SecurityOpt'] = host_config['SecurityOpt']
+
         # Runtime
         if host_config.get('Runtime'):
-            cmd.extend(['--runtime', host_config['Runtime']])
-            
-        # Add the image
-        cmd.append(image)
-        
-        # Command and args
-        if config.get('Cmd'):
-            cmd.extend(config['Cmd'])
-            
-        return cmd
-        
+            hc['Runtime'] = host_config['Runtime']
+
+        body['HostConfig'] = hc
+
+        # Primary network endpoint config (for custom networks)
+        if not is_container_network:
+            networks = (container_info.get('NetworkSettings') or {}).get('Networks') or {}
+            primary_endpoint = networks.get(network_mode)
+            if primary_endpoint:
+                body['NetworkingConfig'] = {
+                    'EndpointsConfig': {network_mode: primary_endpoint}
+                }
+
+        return body
+
     def _cleanup_old_images(self, image: str, keep_versions: int = 3) -> None:
-        """Remove old images, keeping the specified number of most recent versions."""
+        """Remove old images via the Engine API, keeping the specified number of most recent versions."""
         try:
-            # Get all images for this repository with ID, tag, and creation time
-            result = subprocess.run(
-                ['docker', 'images', '--format', '{{.ID}}\t{{.Tag}}\t{{.CreatedAt}}', image],
-                capture_output=True,
-                text=True,
-                check=True
+            response = self._docker.get(
+                '/images/json',
+                params={'filters': json.dumps({'reference': [image]})},
             )
+            local_images = response.json()
 
-            lines = result.stdout.strip().split('\n')
-            lines = [line for line in lines if line]
-
-            if not lines:
+            if not local_images:
                 return
 
-            # Parse and sort by creation time (newest first)
-            images = []
-            for line in lines:
-                parts = line.split('\t')
-                if len(parts) >= 3:
-                    img_id, tag, created = parts[0], parts[1], parts[2]
-                    # Skip <none> tags
-                    if tag != '<none>':
-                        images.append({'id': img_id, 'tag': tag, 'created': created})
+            # Expand to one entry per tag, sorted newest-first by creation timestamp
+            entries = []
+            for img in local_images:
+                created = img.get('Created', 0)  # Unix timestamp
+                for repo_tag in img.get('RepoTags') or []:
+                    tag = repo_tag.rsplit(':', 1)[-1] if ':' in repo_tag else ''
+                    if tag and tag != '<none>':
+                        entries.append({
+                            'id': img['Id'].replace('sha256:', '')[:12],
+                            'tag': tag,
+                            'created': created,
+                        })
 
-            # Sort by creation date descending (newest first)
-            images.sort(key=lambda x: x['created'], reverse=True)
+            if not entries:
+                return
 
-            # Keep the first N versions, mark the rest for removal
-            images_to_remove = images[keep_versions:]
+            entries.sort(key=lambda x: x['created'], reverse=True)
+            images_to_remove = entries[keep_versions:]
 
             if not images_to_remove:
                 self.logger.debug(f"No old images to clean up for {image} (keeping {keep_versions})")
@@ -1040,28 +1139,26 @@ class DockerImageUpdater:
 
             if self.dry_run:
                 for img in images_to_remove:
-                    self.logger.info(f"[DRY RUN] Would remove old image {image}:{img['tag']} ({img['id'][:12]})")
+                    self.logger.info(
+                        f"[DRY RUN] Would remove old image {image}:{img['tag']} ({img['id']})"
+                    )
                 return
 
-            # Remove old images
             for img in images_to_remove:
                 try:
-                    result = subprocess.run(
-                        ['docker', 'rmi', f"{image}:{img['tag']}"],
-                        capture_output=True,
-                        text=True,
-                        check=False  # Don't fail if image is in use
-                    )
-                    if result.returncode == 0:
-                        self.logger.info(f"Removed old image {image}:{img['tag']}")
+                    self._docker.delete(f'/images/{image}:{img["tag"]}')
+                    self.logger.info(f"Removed old image {image}:{img['tag']}")
+                except requests.HTTPError as e:
+                    if e.response is not None and e.response.status_code == 409:
+                        self.logger.debug(f"Could not remove {image}:{img['tag']} (in use)")
                     else:
-                        self.logger.debug(f"Could not remove {image}:{img['tag']} (may be in use)")
-                except (subprocess.SubprocessError, OSError):
+                        self.logger.debug(f"Could not remove {image}:{img['tag']}: {e}")
+                except requests.RequestException:
                     pass
 
-        except subprocess.CalledProcessError as e:
+        except requests.RequestException as e:
             self.logger.warning(f"Error during image cleanup: {e}")
-            
+
     def check_and_update(self, progress_callback=None) -> List[Dict[str, Any]]:
         """Check for updates and apply them if configured.
 
@@ -1093,15 +1190,15 @@ class DockerImageUpdater:
                     'progress': idx,
                     'total': total_images
                 })
-            
+
             # Find matching tag for current base tag
             result = self.find_matching_tag(image, base_tag, regex, registry)
-            
+
             if result:
                 matching_tag, digest = result
                 self.logger.info(f"Base tag '{base_tag}' corresponds to: {matching_tag}")
                 self.logger.debug(f"Digest: {digest}")
-                
+
                 # Check if this is different from our saved state
                 saved_state = self.state.get(image)
 
@@ -1228,10 +1325,10 @@ class DockerImageUpdater:
                             'image': image,
                             'base_tag': base_tag
                         })
-                    
+
         # Save state
         self._save_state()
-        
+
         # Summary
         if updates_found:
             self.logger.info("=== Update Summary ===")
@@ -1241,7 +1338,7 @@ class DockerImageUpdater:
                 )
         else:
             self.logger.info("No updates found")
-            
+
         return updates_found
 
 
@@ -1286,7 +1383,7 @@ def main():
     )
 
     args = parser.parse_args()
-    
+
     try:
         updater = DockerImageUpdater(
             args.config,
@@ -1294,7 +1391,7 @@ def main():
             args.dry_run,
             args.log_level
         )
-        
+
         if args.daemon:
             updater.logger.info(f"Running in daemon mode, checking every {args.interval} seconds")
             while True:
@@ -1310,7 +1407,7 @@ def main():
                     time.sleep(args.interval)
         else:
             updater.check_and_update()
-            
+
     except Exception as e:
         logging.error(f"Fatal error: {e}")
         sys.exit(1)
