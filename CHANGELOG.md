@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [1.0.0] - 2026-02-12
 
 ### Changed
 - Rebranded from "dum" (Docker Update Manager) to "ium" (Image Update Manager)
@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Renamed state file from `docker_update_state.json` to `image_update_state.json`
 - Updated Docker Compose service names (`dum` → `ium`, `dum-cli` → `ium-cli`, `dum-net` → `ium-net`)
 - Updated Docker Hub image names (`brendanl79/dum` → `brendanl79/ium`, `brendanl79/dum-cli` → `brendanl79/ium-cli`)
+- Multi-platform Docker images (linux/amd64, linux/arm64)
 
 ### Fixed
 - Digest-only image updates (image rebuilt under the same tag) are now correctly detected and applied instead of being falsely reported as "already up to date"

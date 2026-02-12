@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.webui
-    image: ium:latest
+    image: brendanl79/ium:latest
     container_name: ium
     restart: unless-stopped
     ports:
@@ -21,7 +21,7 @@ services:
 
   ium-cli:
     build: .
-    image: ium-cli:latest
+    image: brendanl79/ium-cli:latest
     container_name: ium-cli
     restart: unless-stopped
     volumes:

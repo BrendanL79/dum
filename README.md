@@ -1,6 +1,8 @@
 # Image Update Manager (ium)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Docker Pulls](https://img.shields.io/docker/pulls/brendanl79/ium)](https://hub.docker.com/r/brendanl79/ium)
+[![Docker Image Version](https://img.shields.io/docker/v/brendanl79/ium?sort=semver)](https://hub.docker.com/r/brendanl79/ium)
 
 Docker image auto-updater that tracks version-specific tags via regex patterns, compares manifest digests to detect updates, and recreates containers preserving all settings with rollback on failure.
 
@@ -16,11 +18,32 @@ Docker image auto-updater that tracks version-specific tags via regex patterns, 
 
 ## Quick Start
 
+### Docker Hub (recommended)
+
+```bash
+mkdir -p ium/config ium/state && cd ium
+echo '{"images": []}' > config/config.json
+docker run -d --name ium -p 5050:5050 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v ./config:/config -v ./state:/state \
+  brendanl79/ium:latest
+```
+
+Or with docker-compose — save the [docker-compose.yml](docker-compose.yml) from this repo, then:
+
+```bash
+docker-compose up -d              # Web UI at http://localhost:5050
+```
+
+A CLI-only image is also available as `brendanl79/ium-cli`.
+
+### Build from source
+
 ```bash
 git clone https://github.com/BrendanL79/ium.git && cd ium
 mkdir -p config state
 echo '{"images": []}' > config/config.json
-docker-compose up -d --build     # Web UI at http://localhost:5050
+docker-compose up -d --build
 ```
 
 Use the Web UI to add images via **Add from Preset** (19 built-in) or **+ Add Image** (auto-detects patterns from registry).
