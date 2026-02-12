@@ -52,6 +52,35 @@ class TestImageMatches:
         assert not updater._image_matches("nginx", "apache")
         assert not updater._image_matches("linuxserver/sonarr", "linuxserver/radarr")
 
+    def test_portainer_standard(self, updater):
+        """Test standard Portainer CE deployment."""
+        assert updater._image_matches("portainer/portainer-ce", "portainer/portainer-ce:latest")
+        assert updater._image_matches("portainer/portainer-ce", "portainer/portainer-ce:2.21.0")
+        assert updater._image_matches("portainer/portainer-ce", "portainer/portainer-ce:2.21.0-alpine")
+
+    def test_portainer_with_registry(self, updater):
+        """Test Portainer from custom registries."""
+        assert updater._image_matches("portainer/portainer-ce", "cr.portainer.io/portainer/portainer-ce:latest")
+        assert updater._image_matches("portainer/portainer-ce", "docker.io/portainer/portainer-ce:2.21.0")
+        assert updater._image_matches("portainer/portainer-ce", "index.docker.io/portainer/portainer-ce:latest")
+
+    def test_digest_qualifier(self, updater):
+        """Test images pinned with @sha256: digest."""
+        assert updater._image_matches("portainer/portainer-ce", "portainer/portainer-ce:latest@sha256:abc123def456")
+        assert updater._image_matches("nginx", "nginx:1.25@sha256:abc123def456")
+        assert updater._image_matches("linuxserver/sonarr", "lscr.io/linuxserver/sonarr:latest@sha256:abc123")
+
+    def test_localhost_registry_with_port(self, updater):
+        """Test localhost registry with port number."""
+        assert updater._image_matches("myapp", "localhost:5000/myapp:v1")
+        assert updater._image_matches("myapp", "localhost:5000/myapp")
+        assert updater._image_matches("org/myapp", "localhost:5000/org/myapp:v1")
+
+    def test_registry_with_port(self, updater):
+        """Test custom registry with port number."""
+        assert updater._image_matches("myapp", "registry.local:5000/myapp:v1")
+        assert updater._image_matches("org/myapp", "myregistry.io:5000/org/myapp:latest")
+
 
 class TestGetContainersForImage:
     """Test the _get_containers_for_image method."""

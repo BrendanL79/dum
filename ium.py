@@ -646,12 +646,14 @@ class DockerImageUpdater:
             )
 
             containers = []
+            all_images = []
             for line in result.stdout.strip().split('\n'):
                 if not line:
                     continue
                 try:
                     container = json.loads(line)
                     container_image = container.get('Image', '')
+                    all_images.append(container_image)
 
                     if self._image_matches(image, container_image):
                         containers.append({
@@ -661,13 +663,56 @@ class DockerImageUpdater:
                             'image_ref': container_image
                         })
                 except json.JSONDecodeError:
+                    self.logger.debug(f"Skipping non-JSON docker ps line: {line!r}")
                     continue
+
+            if not containers and all_images:
+                normalized = self._normalize_image_ref(image)
+                self.logger.debug(
+                    f"No containers matched '{image}' (normalized: '{normalized}'). "
+                    f"All container images: {all_images}"
+                )
 
             return containers
 
         except subprocess.CalledProcessError as e:
             self.logger.error(f"Failed to list containers: {e}")
             return []
+
+    @staticmethod
+    def _normalize_image_ref(img: str) -> str:
+        """Normalize a Docker image reference for comparison.
+
+        Strips tags, digest qualifiers, and registry prefixes to yield just
+        the repository path (e.g. ``portainer/portainer-ce``).  Single-name
+        images get an implicit ``library/`` prefix so that ``nginx`` and
+        ``library/nginx`` compare equal.
+        """
+        # Strip digest qualifier (@sha256:...)
+        at_pos = img.find('@')
+        if at_pos != -1:
+            img = img[:at_pos]
+
+        # Strip tag — but only when the colon is in the *tag* position
+        # (after the last slash), not in a registry:port position.
+        last_slash = img.rfind('/')
+        last_colon = img.rfind(':')
+        if last_colon > last_slash:
+            img = img[:last_colon]
+
+        # Strip registry prefix.  The first path component is a registry if
+        # it contains a dot, a colon (port), or is literally "localhost".
+        if '/' in img:
+            path_parts = img.split('/')
+            first = path_parts[0]
+            if '.' in first or ':' in first or first == 'localhost':
+                img = '/'.join(path_parts[1:])
+
+        # Implicit library namespace: postgres → library/postgres
+        if '/' not in img:
+            return f"library/{img}"
+
+        return img
 
     def _image_matches(self, config_image: str, container_image: str) -> bool:
         """Check if a container image matches the configured image.
@@ -676,38 +721,18 @@ class DockerImageUpdater:
         - Tag variations: nginx matches nginx:alpine
         - Registry prefixes: linuxserver/sonarr matches lscr.io/linuxserver/sonarr:latest
         - Implicit library namespace: postgres matches library/postgres
+        - Digest qualifiers: image:tag@sha256:... matches image
+        - Registry ports: localhost:5000/img matches img
         """
-        # Normalize images by removing tags for comparison
-        def normalize(img: str) -> str:
-            # Split on last colon to separate tag
-            parts = img.rsplit(':', 1)
-            base = parts[0]
+        normalized_config = self._normalize_image_ref(config_image)
+        normalized_container = self._normalize_image_ref(container_image)
 
-            # Handle registry prefixes (keep everything before /)
-            # linuxserver/sonarr stays as-is
-            # lscr.io/linuxserver/sonarr becomes linuxserver/sonarr
-            if '/' in base:
-                path_parts = base.split('/')
-                # If first part has a dot or is localhost, it's a registry
-                if '.' in path_parts[0] or path_parts[0] == 'localhost':
-                    base = '/'.join(path_parts[1:])
-
-            # Handle implicit library namespace
-            # postgres becomes library/postgres for comparison
-            if '/' not in base:
-                return f"library/{base}"
-
-            return base
-
-        normalized_config = normalize(config_image)
-        normalized_container = normalize(container_image)
-
-        # Also check without library prefix
-        normalized_config_no_lib = normalized_config.replace('library/', '')
-        normalized_container_no_lib = normalized_container.replace('library/', '')
+        # Also check without library/ prefix so that "library/nginx" matches "nginx"
+        def strip_library(s: str) -> str:
+            return s[len('library/'):] if s.startswith('library/') else s
 
         return (normalized_config == normalized_container or
-                normalized_config_no_lib == normalized_container_no_lib)
+                strip_library(normalized_config) == strip_library(normalized_container))
 
     def _get_container_current_tag(self, container_name: str, image: str, regex: str) -> Optional[str]:
         """Get the current version tag of a running container by checking image inventory."""
