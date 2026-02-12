@@ -2,7 +2,7 @@
 FROM docker:27-cli AS docker-cli
 
 # Stage 2: Build final image
-FROM python:3.11-alpine
+FROM python:3.14-alpine
 
 LABEL org.opencontainers.image.title="ium"
 LABEL org.opencontainers.image.description="Image Update Manager"
