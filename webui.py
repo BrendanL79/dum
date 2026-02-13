@@ -21,7 +21,7 @@ import jsonschema
 from flask import Flask, render_template, jsonify, request, Response
 from flask_socketio import SocketIO, emit
 
-from ium import DockerImageUpdater, CONFIG_SCHEMA, __version__, _validate_regex
+from ium import DockerImageUpdater, CONFIG_SCHEMA, __version__, _validate_regex, AuthManager
 from pattern_utils import detect_tag_patterns, detect_base_tags
 
 app = Flask(__name__)
@@ -50,18 +50,12 @@ DAEMON_STATE_FILE = Path(os.environ.get('STATE_FILE', '/state/image_update_state
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Optional basic auth
-AUTH_USER = os.environ.get('WEBUI_USER', '').strip()
-AUTH_PASSWORD = os.environ.get('WEBUI_PASSWORD', '').strip()
+# Auth setup: auto-generates secure credentials on first run if env vars are not set
+_state_dir = Path(os.environ.get('STATE_FILE', '/state/image_update_state.json')).parent
+_auth_manager = AuthManager(_state_dir)
+AUTH_USER = _auth_manager.user
+AUTH_PASSWORD = _auth_manager.password
 AUTH_ENABLED = bool(AUTH_USER and AUTH_PASSWORD)
-
-if AUTH_ENABLED:
-    logger.info("Basic authentication enabled")
-else:
-    logger.warning(
-        "Authentication is DISABLED. The web UI is accessible without credentials. "
-        "Set WEBUI_USER and WEBUI_PASSWORD environment variables to enable authentication."
-    )
 
 
 def _check_credentials(username: str, password: str) -> bool:

@@ -14,6 +14,9 @@ services:
       - ./state:/state
     environment:
       - LOG_LEVEL=INFO
+      # Authentication: credentials are auto-generated on first run and stored in
+      # /state/.auth.json. Check container logs for the generated username/password.
+      # To set fixed credentials instead, uncomment and set these env vars:
       # - WEBUI_USER=admin
       # - WEBUI_PASSWORD=changeme
     networks:

@@ -1,7 +1,7 @@
 """Tests for the ium web UI (webui.py).
 
 Covers: status endpoints, CSRF protection, authentication, config CRUD,
-check/daemon control, Socket.IO events, and pattern detection.
+check/daemon control, Socket.IO events, pattern detection, and AuthManager.
 """
 
 import base64
@@ -436,3 +436,90 @@ class TestDetectPatterns:
         resp = _post_json(app_client, "/api/detect-patterns", {"image": ""})
         assert resp.status_code == 400
         assert "required" in resp.get_json()["error"].lower()
+
+
+# ===========================================================================
+# TestAuthManager
+# ===========================================================================
+
+from ium import AuthManager
+
+
+class TestAuthManager:
+    def test_env_var_credentials_take_priority(self, tmp_path, monkeypatch):
+        """Env vars override stored or generated credentials."""
+        monkeypatch.setenv("WEBUI_USER", "envuser")
+        monkeypatch.setenv("WEBUI_PASSWORD", "envpass")
+        am = AuthManager(tmp_path)
+        assert am.user == "envuser"
+        assert am.password == "envpass"
+        # No auth file should be written when using env vars
+        assert not (tmp_path / AuthManager.AUTH_FILE).exists()
+
+    def test_generates_credentials_on_first_run(self, tmp_path, monkeypatch):
+        """Credentials are auto-generated and persisted when no env vars or stored creds."""
+        monkeypatch.delenv("WEBUI_USER", raising=False)
+        monkeypatch.delenv("WEBUI_PASSWORD", raising=False)
+        am = AuthManager(tmp_path)
+        assert am.user == "admin"
+        assert len(am.password) > 0
+        auth_file = tmp_path / AuthManager.AUTH_FILE
+        assert auth_file.exists()
+
+    def test_generated_credentials_are_persisted(self, tmp_path, monkeypatch):
+        """Generated credentials are stored in .auth.json."""
+        monkeypatch.delenv("WEBUI_USER", raising=False)
+        monkeypatch.delenv("WEBUI_PASSWORD", raising=False)
+        am1 = AuthManager(tmp_path)
+        am2 = AuthManager(tmp_path)
+        assert am1.user == am2.user
+        assert am1.password == am2.password
+
+    def test_stored_credentials_loaded_on_subsequent_runs(self, tmp_path, monkeypatch):
+        """Second AuthManager instance loads the same credentials from disk."""
+        monkeypatch.delenv("WEBUI_USER", raising=False)
+        monkeypatch.delenv("WEBUI_PASSWORD", raising=False)
+        am1 = AuthManager(tmp_path)
+        first_password = am1.password
+        am2 = AuthManager(tmp_path)
+        assert am2.password == first_password
+
+    def test_auth_file_has_secure_permissions(self, tmp_path, monkeypatch):
+        """Generated .auth.json must be owner-read-only (0600)."""
+        monkeypatch.delenv("WEBUI_USER", raising=False)
+        monkeypatch.delenv("WEBUI_PASSWORD", raising=False)
+        AuthManager(tmp_path)
+        auth_file = tmp_path / AuthManager.AUTH_FILE
+        mode = auth_file.stat().st_mode & 0o777
+        assert mode == 0o600
+
+    def test_env_var_does_not_overwrite_stored_credentials(self, tmp_path, monkeypatch):
+        """Env-var credentials must not modify the stored .auth.json."""
+        monkeypatch.delenv("WEBUI_USER", raising=False)
+        monkeypatch.delenv("WEBUI_PASSWORD", raising=False)
+        # First: generate and store credentials
+        am1 = AuthManager(tmp_path)
+        stored_password = am1.password
+
+        # Second: env vars set — stored file should be unchanged
+        monkeypatch.setenv("WEBUI_USER", "override")
+        monkeypatch.setenv("WEBUI_PASSWORD", "overridepass")
+        am2 = AuthManager(tmp_path)
+        assert am2.user == "override"
+        assert am2.password == "overridepass"
+
+        # The stored file should still hold original credentials
+        import json as _json
+        data = _json.loads((tmp_path / AuthManager.AUTH_FILE).read_text())
+        assert data["password"] == stored_password
+
+    def test_auth_file_content_structure(self, tmp_path, monkeypatch):
+        """The .auth.json file must have version, username, and password fields."""
+        monkeypatch.delenv("WEBUI_USER", raising=False)
+        monkeypatch.delenv("WEBUI_PASSWORD", raising=False)
+        am = AuthManager(tmp_path)
+        import json as _json
+        data = _json.loads((tmp_path / AuthManager.AUTH_FILE).read_text())
+        assert data["version"] == 1
+        assert data["username"] == am.user
+        assert data["password"] == am.password
