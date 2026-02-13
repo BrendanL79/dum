@@ -1063,8 +1063,8 @@ class DockerImageUpdater:
                         self.logger.info(f"Removed old image {image}:{img['tag']}")
                     else:
                         self.logger.debug(f"Could not remove {image}:{img['tag']} (may be in use)")
-                except DockerAPIError:
-                    pass
+                except (DockerAPIError, OSError) as e:
+                    self.logger.warning(f"Could not remove {image}:{img['tag']}: {e}")
 
         except DockerAPIError as e:
             self.logger.warning(f"Error during image cleanup: {e}")

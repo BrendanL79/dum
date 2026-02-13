@@ -148,10 +148,10 @@ class DockerClient:
         result = self._request("GET", "/images/json", query={"filters": filters})
         return result or []
 
-    def remove_image(self, image_ref: str) -> bool:
+    def remove_image(self, image_ref: str, timeout: int = 120) -> bool:
         """Remove an image.  Returns True on success, False on 404/409."""
         try:
-            self._request("DELETE", f"/images/{image_ref}")
+            self._request("DELETE", f"/images/{image_ref}", timeout=timeout)
             return True
         except DockerAPIError as e:
             if e.status in (404, 409):
