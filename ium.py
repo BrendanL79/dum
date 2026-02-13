@@ -11,7 +11,6 @@ __version__ = "1.0.0"
 
 import json
 import re
-import subprocess
 import sys
 import time
 import logging
@@ -29,6 +28,7 @@ import requests
 import jsonschema
 
 from pattern_utils import detect_tag_patterns, detect_base_tags
+from docker_api import DockerClient, DockerAPIError
 
 # Platform-specific imports and constant
 IS_WINDOWS = platform.system() == 'Windows'
@@ -142,6 +142,9 @@ class DockerImageUpdater:
         # Setup logging
         self.logger = self._setup_logging(log_level)
         
+        # Docker Engine API client
+        self.docker = DockerClient()
+
         # Load configuration and state
         self.compiled_patterns = {}  # Cache for compiled regex patterns
         self.config = self._load_config()
@@ -600,55 +603,39 @@ class DockerImageUpdater:
     def _pull_image(self, image: str, tag: str) -> bool:
         """
         Pull a Docker image.
-        
+
         Args:
             image: Image name
             tag: Tag to pull
-            
+
         Returns:
             True if successful, False otherwise
         """
         full_image = f"{image}:{tag}"
-        
+
         if self.dry_run:
             self.logger.info(f"[DRY RUN] Would pull {full_image}")
             return True
-            
+
         self.logger.info(f"Pulling {full_image}...")
-        
+
         try:
-            # Use subprocess with proper argument handling
-            subprocess.run(
-                ['docker', 'pull', full_image],
-                capture_output=True,
-                text=True,
-                check=True
-            )
+            self.docker.pull_image(image, tag)
             self.logger.info(f"Successfully pulled {full_image}")
             return True
-        except subprocess.CalledProcessError as e:
-            self.logger.error(f"Error pulling {full_image}: {e.stderr}")
+        except DockerAPIError as e:
+            self.logger.error(f"Error pulling {full_image}: {e.message}")
             return False
             
     def _get_container_config(self, container_name: str) -> Optional[Dict[str, Any]]:
         """Get full container configuration."""
         try:
-            result = subprocess.run(
-                ['docker', 'inspect', container_name],
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            return json.loads(result.stdout)[0]
-        except subprocess.CalledProcessError as e:
-            stderr = (e.stderr or '').strip()
+            return self.docker.inspect_container(container_name)
+        except DockerAPIError as e:
             self.logger.error(
-                f"Error inspecting container '{container_name}': {stderr or e}. "
-                f"Check that the container_name in config matches a running container (docker ps -a --format '{{{{.Names}}}}')"
+                f"Error inspecting container '{container_name}': {e.message}. "
+                f"Check that the container_name in config matches a running container."
             )
-            return None
-        except (json.JSONDecodeError, IndexError) as e:
-            self.logger.error(f"Error parsing container config for '{container_name}': {e}")
             return None
 
     def _get_containers_for_image(self, image: str) -> List[Dict[str, str]]:
@@ -658,33 +645,24 @@ class DockerImageUpdater:
             List of dicts with keys: name, id, state, image_ref
         """
         try:
-            result = subprocess.run(
-                ['docker', 'ps', '-a', '--format', 'json'],
-                capture_output=True,
-                text=True,
-                check=True
-            )
+            api_containers = self.docker.list_containers(all=True)
 
             containers = []
             all_images = []
-            for line in result.stdout.strip().split('\n'):
-                if not line:
-                    continue
-                try:
-                    container = json.loads(line)
-                    container_image = container.get('Image', '')
-                    all_images.append(container_image)
+            for container in api_containers:
+                container_image = container.get('Image', '')
+                all_images.append(container_image)
 
-                    if self._image_matches(image, container_image):
-                        containers.append({
-                            'name': container.get('Names', ''),
-                            'id': container.get('ID', ''),
-                            'state': container.get('State', ''),
-                            'image_ref': container_image
-                        })
-                except json.JSONDecodeError:
-                    self.logger.debug(f"Skipping non-JSON docker ps line: {line!r}")
-                    continue
+                if self._image_matches(image, container_image):
+                    # API returns Names as list with "/" prefix, e.g. ["/sonarr"]
+                    names = container.get('Names', [])
+                    name = names[0].lstrip('/') if names else ''
+                    containers.append({
+                        'name': name,
+                        'id': container.get('Id', ''),
+                        'state': container.get('State', ''),
+                        'image_ref': container_image
+                    })
 
             if not containers and all_images:
                 normalized = self._normalize_image_ref(image)
@@ -695,7 +673,7 @@ class DockerImageUpdater:
 
             return containers
 
-        except subprocess.CalledProcessError as e:
+        except DockerAPIError as e:
             self.logger.error(f"Failed to list containers: {e}")
             return []
 
@@ -774,28 +752,28 @@ class DockerImageUpdater:
                 self.logger.debug(f"Pattern not found in cache: '{regex}'")
                 return None
 
-            # Query docker images to find all tags for this image name
-            result = subprocess.run(
-                ['docker', 'images', image, '--format', '{{.Tag}} {{.ID}}'],
-                capture_output=True,
-                text=True
-            )
-
-            if result.returncode != 0:
+            # Query Docker API for images matching this name
+            try:
+                images = self.docker.list_images(image)
+            except DockerAPIError:
                 self.logger.debug(f"Failed to get image tags for {image}")
                 return None
 
-            # Extract short ID from container's image (first 12 chars after sha256:)
-            short_id = image_id.replace('sha256:', '')[:12]
+            # Normalize the container's image ID for comparison
+            # image_id from inspect is full sha256:..., API returns Id as sha256:...
+            normalized_id = image_id if image_id.startswith('sha256:') else f"sha256:{image_id}"
 
             # Find tags that match both the image ID and regex pattern
-            for line in result.stdout.strip().split('\n'):
-                if not line:
+            for img in images:
+                if img.get('Id', '') != normalized_id:
                     continue
-                parts = line.split()
-                if len(parts) >= 2:
-                    tag, tag_id = parts[0], parts[1]
-                    if tag_id == short_id and pattern.match(tag):
+                for repo_tag in img.get('RepoTags') or []:
+                    # RepoTags are "image:tag" format
+                    if ':' in repo_tag:
+                        tag = repo_tag.rsplit(':', 1)[1]
+                    else:
+                        tag = repo_tag
+                    if pattern.match(tag):
                         self.logger.debug(f"Found matching tag for {container_name}: {tag}")
                         return tag
 
@@ -808,59 +786,70 @@ class DockerImageUpdater:
     def _update_container(self, container_name: str, image: str, tag: str) -> bool:
         """
         Update a running container with a new image.
-        
+
         Args:
             container_name: Name of the container to update
             image: Image name
             tag: Tag to use
-            
+
         Returns:
             True if successful, False otherwise
         """
         full_image = f"{image}:{tag}"
-        
+
         if self.dry_run:
             self.logger.info(f"[DRY RUN] Would update container {container_name} with image {full_image}")
             return True
-            
+
         # Get current container configuration
         container_info = self._get_container_config(container_name)
         if not container_info:
             return False
-            
+
         try:
-            # Build docker run command preserving all settings
-            run_cmd = self._build_run_command(container_name, full_image, container_info)
+            # Build container create config preserving all settings
+            create_config, extra_networks = self._build_create_config(
+                container_name, full_image, container_info
+            )
 
             # Stop the container
             self.logger.info(f"Stopping container {container_name}...")
-            subprocess.run(['docker', 'stop', container_name], check=True)
-            
+            self.docker.stop_container(container_name)
+
             # Rename old container as backup
             backup_name = f"{container_name}_backup_{int(time.time())}"
             self.logger.info(f"Renaming old container to {backup_name}")
-            subprocess.run(['docker', 'rename', container_name, backup_name], check=True)
-            
-            # Create new container
+            self.docker.rename_container(container_name, backup_name)
+
+            # Create and start new container
             self.logger.info(f"Creating new container {container_name}...")
-            result = subprocess.run(run_cmd, capture_output=True, text=True)
-            
-            if result.returncode != 0:
+            try:
+                container_id = self.docker.create_container(container_name, create_config)
+                self.docker.start_container(container_id)
+
+                # Connect to additional networks
+                for network in extra_networks:
+                    self.docker.connect_network(network, container_id)
+
+            except DockerAPIError as e:
                 # Rollback on failure
-                self.logger.error(f"Failed to create new container: {result.stderr}")
+                self.logger.error(f"Failed to create new container: {e.message}")
                 self.logger.info("Rolling back...")
-                subprocess.run(['docker', 'rename', backup_name, container_name], check=False)
-                subprocess.run(['docker', 'start', container_name], check=False)
+                try:
+                    self.docker.rename_container(backup_name, container_name)
+                    self.docker.start_container(container_name)
+                except DockerAPIError:
+                    pass
                 return False
-                
+
             # Success - remove old container
             self.logger.info(f"Removing old container {backup_name}")
-            subprocess.run(['docker', 'rm', backup_name], check=True)
-            
+            self.docker.remove_container(backup_name)
+
             self.logger.info(f"Successfully updated container {container_name}")
             return True
-            
-        except subprocess.CalledProcessError as e:
+
+        except DockerAPIError as e:
             self.logger.error(f"Error updating container: {e}")
             return False
 
@@ -891,11 +880,13 @@ class DockerImageUpdater:
 
         return results
 
-    def _build_run_command(self, container_name: str, image: str, 
-                          container_info: Dict[str, Any]) -> List[str]:
-        """Build docker run command preserving container settings."""
-        cmd = ['docker', 'run', '-d', '--name', container_name]
-        
+    def _build_create_config(self, container_name: str, image: str,
+                             container_info: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
+        """Build Docker API container create config preserving container settings.
+
+        Returns:
+            Tuple of (create_config dict, list of additional network names to connect after creation)
+        """
         config = container_info['Config']
         host_config = container_info['HostConfig']
 
@@ -905,46 +896,65 @@ class DockerImageUpdater:
         is_container_network = network_mode.startswith('container:')
         shares_network_namespace = is_host_network or is_container_network
 
-        # Restart policy
-        restart_policy = host_config.get('RestartPolicy', {})
-        if restart_policy.get('Name'):
-            if restart_policy['Name'] == 'on-failure':
-                cmd.extend(['--restart', f"on-failure:{restart_policy.get('MaximumRetryCount', 0)}"])
-            else:
-                cmd.extend(['--restart', restart_policy['Name']])
+        # Build the create config
+        create_config: Dict[str, Any] = {
+            'Image': image,
+        }
 
         # Hostname (not allowed with host or container: network modes)
         if not shares_network_namespace:
             if config.get('Hostname') and config['Hostname'] != container_info['Id'][:12]:
-                cmd.extend(['--hostname', config['Hostname']])
+                create_config['Hostname'] = config['Hostname']
 
         # User
         if config.get('User'):
-            cmd.extend(['--user', config['User']])
+            create_config['User'] = config['User']
 
         # Working directory
         if config.get('WorkingDir'):
-            cmd.extend(['--workdir', config['WorkingDir']])
+            create_config['WorkingDir'] = config['WorkingDir']
 
-        # Environment variables
+        # Environment variables (filtered)
+        env = []
         for env_var in config.get('Env') or []:
-            # Skip Docker-injected variables
             if not any(env_var.startswith(prefix) for prefix in ('PATH=', 'HOSTNAME=')):
-                cmd.extend(['-e', env_var])
+                env.append(env_var)
+        if env:
+            create_config['Env'] = env
 
-        # Port mappings (not applicable with host or container: network modes)
+        # Labels (preserve compose labels for stack membership)
+        labels = {}
+        for key, value in (config.get('Labels') or {}).items():
+            if key.startswith('com.docker.compose.'):
+                labels[key] = value
+            elif not key.startswith('com.docker.'):
+                labels[key] = value
+        if labels:
+            create_config['Labels'] = labels
+
+        # Command
+        if config.get('Cmd'):
+            create_config['Cmd'] = config['Cmd']
+
+        # ExposedPorts — pass through from original config
+        if not shares_network_namespace and config.get('ExposedPorts'):
+            create_config['ExposedPorts'] = config['ExposedPorts']
+
+        # ── HostConfig ────────────────────────────────────────────
+        hc: Dict[str, Any] = {}
+
+        # Restart policy
+        restart_policy = host_config.get('RestartPolicy', {})
+        if restart_policy.get('Name'):
+            hc['RestartPolicy'] = restart_policy
+
+        # Port bindings (not applicable with host or container: network modes)
         if not shares_network_namespace:
-            for container_port, bindings in (host_config.get('PortBindings') or {}).items():
-                if bindings:
-                    for binding in bindings:
-                        host_ip = binding.get('HostIp', '')
-                        host_port = binding.get('HostPort', '')
-                        if host_ip and host_ip != '0.0.0.0':
-                            cmd.extend(['-p', f"{host_ip}:{host_port}:{container_port}"])
-                        else:
-                            cmd.extend(['-p', f"{host_port}:{container_port}"])
-                        
-        # Volume mappings
+            if host_config.get('PortBindings'):
+                hc['PortBindings'] = host_config['PortBindings']
+
+        # Volume bindings (from Mounts → Binds format)
+        binds = []
         for mount in container_info.get('Mounts') or []:
             if mount['Type'] == 'bind':
                 source = mount['Source']
@@ -953,102 +963,85 @@ class DockerImageUpdater:
             else:
                 continue
 
-            mount_str = f"{source}:{mount['Destination']}"
+            bind_str = f"{source}:{mount['Destination']}"
             if mount.get('Mode'):
-                mount_str += f":{mount['Mode']}"
-            cmd.extend(['-v', mount_str])
-                
+                bind_str += f":{mount['Mode']}"
+            binds.append(bind_str)
+        if binds:
+            hc['Binds'] = binds
+
         # Network mode
         if network_mode and network_mode != 'default':
-            cmd.extend(['--network', network_mode])
+            hc['NetworkMode'] = network_mode
 
-        # Additional networks (not applicable with container: network mode)
+        # Privileged
+        if host_config.get('Privileged'):
+            hc['Privileged'] = True
+
+        # Capabilities
+        if host_config.get('CapAdd'):
+            hc['CapAdd'] = host_config['CapAdd']
+        if host_config.get('CapDrop'):
+            hc['CapDrop'] = host_config['CapDrop']
+
+        # Devices
+        if host_config.get('Devices'):
+            hc['Devices'] = host_config['Devices']
+
+        # Memory limits
+        if host_config.get('Memory'):
+            hc['Memory'] = host_config['Memory']
+
+        # CPU limits
+        if host_config.get('CpuShares'):
+            hc['CpuShares'] = host_config['CpuShares']
+        if host_config.get('CpuQuota'):
+            hc['CpuQuota'] = host_config['CpuQuota']
+
+        # Security options
+        if host_config.get('SecurityOpt'):
+            hc['SecurityOpt'] = host_config['SecurityOpt']
+
+        # Runtime
+        if host_config.get('Runtime'):
+            hc['Runtime'] = host_config['Runtime']
+
+        if hc:
+            create_config['HostConfig'] = hc
+
+        # ── Additional networks ───────────────────────────────────
+        extra_networks: List[str] = []
         if not is_container_network:
             for network in ((container_info.get('NetworkSettings') or {}).get('Networks') or {}).keys():
                 if network != network_mode:
-                    cmd.extend(['--network', network])
-                
-        # Privileged
-        if host_config.get('Privileged'):
-            cmd.append('--privileged')
-            
-        # Capabilities
-        for cap in host_config.get('CapAdd') or []:
-            cmd.extend(['--cap-add', cap])
-        for cap in host_config.get('CapDrop') or []:
-            cmd.extend(['--cap-drop', cap])
+                    extra_networks.append(network)
 
-        # Devices
-        for device in host_config.get('Devices') or []:
-            device_str = device['PathOnHost']
-            if device.get('PathInContainer'):
-                device_str += f":{device['PathInContainer']}"
-            if device.get('CgroupPermissions'):
-                device_str += f":{device['CgroupPermissions']}"
-            cmd.extend(['--device', device_str])
-            
-        # Memory limits
-        if host_config.get('Memory'):
-            cmd.extend(['-m', str(host_config['Memory'])])
-            
-        # CPU limits
-        if host_config.get('CpuShares'):
-            cmd.extend(['--cpu-shares', str(host_config['CpuShares'])])
-        if host_config.get('CpuQuota'):
-            cmd.extend(['--cpu-quota', str(host_config['CpuQuota'])])
-            
-        # Labels (preserve compose labels for stack membership)
-        for key, value in (config.get('Labels') or {}).items():
-            if key.startswith('com.docker.compose.'):
-                cmd.extend(['--label', f"{key}={value}"])
-            elif not key.startswith('com.docker.'):
-                cmd.extend(['--label', f"{key}={value}"])
-
-        # Security options
-        for opt in host_config.get('SecurityOpt') or []:
-            cmd.extend(['--security-opt', opt])
-            
-        # Runtime
-        if host_config.get('Runtime'):
-            cmd.extend(['--runtime', host_config['Runtime']])
-            
-        # Add the image
-        cmd.append(image)
-        
-        # Command and args
-        if config.get('Cmd'):
-            cmd.extend(config['Cmd'])
-            
-        return cmd
+        return create_config, extra_networks
         
     def _cleanup_old_images(self, image: str, keep_versions: int = 3) -> None:
         """Remove old images, keeping the specified number of most recent versions."""
         try:
-            # Get all images for this repository with ID, tag, and creation time
-            result = subprocess.run(
-                ['docker', 'images', '--format', '{{.ID}}\t{{.Tag}}\t{{.CreatedAt}}', image],
-                capture_output=True,
-                text=True,
-                check=True
-            )
+            api_images = self.docker.list_images(image)
 
-            lines = result.stdout.strip().split('\n')
-            lines = [line for line in lines if line]
-
-            if not lines:
+            if not api_images:
                 return
 
-            # Parse and sort by creation time (newest first)
+            # Flatten to individual tag entries with creation time
             images = []
-            for line in lines:
-                parts = line.split('\t')
-                if len(parts) >= 3:
-                    img_id, tag, created = parts[0], parts[1], parts[2]
-                    # Skip <none> tags
+            for img in api_images:
+                for repo_tag in img.get('RepoTags') or []:
+                    if ':' in repo_tag:
+                        tag = repo_tag.rsplit(':', 1)[1]
+                    else:
+                        tag = repo_tag
                     if tag != '<none>':
-                        images.append({'id': img_id, 'tag': tag, 'created': created})
+                        images.append({
+                            'id': img.get('Id', '')[:19],  # sha256: + 12 chars
+                            'tag': tag,
+                            'created': img.get('Created', 0),
+                        })
 
-            # Sort by creation date descending (newest first)
+            # Sort by creation time descending (newest first)
             images.sort(key=lambda x: x['created'], reverse=True)
 
             # Keep the first N versions, mark the rest for removal
@@ -1066,20 +1059,14 @@ class DockerImageUpdater:
             # Remove old images
             for img in images_to_remove:
                 try:
-                    result = subprocess.run(
-                        ['docker', 'rmi', f"{image}:{img['tag']}"],
-                        capture_output=True,
-                        text=True,
-                        check=False  # Don't fail if image is in use
-                    )
-                    if result.returncode == 0:
+                    if self.docker.remove_image(f"{image}:{img['tag']}"):
                         self.logger.info(f"Removed old image {image}:{img['tag']}")
                     else:
                         self.logger.debug(f"Could not remove {image}:{img['tag']} (may be in use)")
-                except (subprocess.SubprocessError, OSError):
+                except DockerAPIError:
                     pass
 
-        except subprocess.CalledProcessError as e:
+        except DockerAPIError as e:
             self.logger.warning(f"Error during image cleanup: {e}")
             
     def check_and_update(self, progress_callback=None) -> List[Dict[str, Any]]:

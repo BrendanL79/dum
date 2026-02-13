@@ -4,6 +4,7 @@ import json
 import pytest
 from unittest.mock import Mock, patch
 from ium import DockerImageUpdater
+from docker_api import DockerAPIError
 
 
 @pytest.fixture
@@ -87,28 +88,20 @@ class TestGetContainersForImage:
 
     def test_no_containers(self, updater):
         """Test when no containers exist."""
-        mock_result = Mock()
-        mock_result.returncode = 0
-        mock_result.stdout = ""
-
-        with patch('subprocess.run', return_value=mock_result):
+        with patch.object(updater.docker, 'list_containers', return_value=[]):
             containers = updater._get_containers_for_image("nginx")
             assert containers == []
 
     def test_single_container(self, updater):
         """Test finding a single container."""
-        container_json = json.dumps({
-            "ID": "abc123",
-            "Names": "sonarr",
+        api_containers = [{
+            "Id": "abc123",
+            "Names": ["/sonarr"],
             "Image": "linuxserver/sonarr:4.0.0.740",
             "State": "running"
-        })
+        }]
 
-        mock_result = Mock()
-        mock_result.returncode = 0
-        mock_result.stdout = container_json
-
-        with patch('subprocess.run', return_value=mock_result):
+        with patch.object(updater.docker, 'list_containers', return_value=api_containers):
             containers = updater._get_containers_for_image("linuxserver/sonarr")
 
             assert len(containers) == 1
@@ -119,24 +112,22 @@ class TestGetContainersForImage:
 
     def test_multiple_containers(self, updater):
         """Test finding multiple containers with same image."""
-        container1 = json.dumps({
-            "ID": "abc123",
-            "Names": "sonarr-hd",
-            "Image": "linuxserver/sonarr:4.0.0.740",
-            "State": "running"
-        })
-        container2 = json.dumps({
-            "ID": "def456",
-            "Names": "sonarr-4k",
-            "Image": "linuxserver/sonarr:4.0.0.740",
-            "State": "running"
-        })
+        api_containers = [
+            {
+                "Id": "abc123",
+                "Names": ["/sonarr-hd"],
+                "Image": "linuxserver/sonarr:4.0.0.740",
+                "State": "running"
+            },
+            {
+                "Id": "def456",
+                "Names": ["/sonarr-4k"],
+                "Image": "linuxserver/sonarr:4.0.0.740",
+                "State": "running"
+            },
+        ]
 
-        mock_result = Mock()
-        mock_result.returncode = 0
-        mock_result.stdout = f"{container1}\n{container2}"
-
-        with patch('subprocess.run', return_value=mock_result):
+        with patch.object(updater.docker, 'list_containers', return_value=api_containers):
             containers = updater._get_containers_for_image("linuxserver/sonarr")
 
             assert len(containers) == 2
@@ -145,18 +136,14 @@ class TestGetContainersForImage:
 
     def test_stopped_containers_included(self, updater):
         """Test that stopped containers are also returned."""
-        container_json = json.dumps({
-            "ID": "abc123",
-            "Names": "sonarr",
+        api_containers = [{
+            "Id": "abc123",
+            "Names": ["/sonarr"],
             "Image": "linuxserver/sonarr:4.0.0.740",
             "State": "exited"
-        })
+        }]
 
-        mock_result = Mock()
-        mock_result.returncode = 0
-        mock_result.stdout = container_json
-
-        with patch('subprocess.run', return_value=mock_result):
+        with patch.object(updater.docker, 'list_containers', return_value=api_containers):
             containers = updater._get_containers_for_image("linuxserver/sonarr")
 
             assert len(containers) == 1
@@ -164,34 +151,31 @@ class TestGetContainersForImage:
 
     def test_filters_non_matching_containers(self, updater):
         """Test that only matching containers are returned."""
-        container1 = json.dumps({
-            "ID": "abc123",
-            "Names": "sonarr",
-            "Image": "linuxserver/sonarr:4.0.0.740",
-            "State": "running"
-        })
-        container2 = json.dumps({
-            "ID": "def456",
-            "Names": "radarr",
-            "Image": "linuxserver/radarr:6.0.0.123",
-            "State": "running"
-        })
+        api_containers = [
+            {
+                "Id": "abc123",
+                "Names": ["/sonarr"],
+                "Image": "linuxserver/sonarr:4.0.0.740",
+                "State": "running"
+            },
+            {
+                "Id": "def456",
+                "Names": ["/radarr"],
+                "Image": "linuxserver/radarr:6.0.0.123",
+                "State": "running"
+            },
+        ]
 
-        mock_result = Mock()
-        mock_result.returncode = 0
-        mock_result.stdout = f"{container1}\n{container2}"
-
-        with patch('subprocess.run', return_value=mock_result):
+        with patch.object(updater.docker, 'list_containers', return_value=api_containers):
             containers = updater._get_containers_for_image("linuxserver/sonarr")
 
             assert len(containers) == 1
             assert containers[0]['name'] == 'sonarr'
 
-    def test_docker_command_failure(self, updater):
-        """Test handling of docker command failure."""
-        from subprocess import CalledProcessError
-
-        with patch('subprocess.run', side_effect=CalledProcessError(1, 'docker')):
+    def test_docker_api_failure(self, updater):
+        """Test handling of Docker API failure."""
+        with patch.object(updater.docker, 'list_containers',
+                          side_effect=DockerAPIError(500, "Internal Server Error")):
             containers = updater._get_containers_for_image("nginx")
             assert containers == []
 

@@ -1,16 +1,9 @@
-# Stage 1: Get Docker CLI binary
-FROM docker:27-cli AS docker-cli
-
-# Stage 2: Build final image
 FROM python:3.14-alpine
 
 LABEL org.opencontainers.image.title="ium-cli"
 LABEL org.opencontainers.image.description="Image Update Manager — CLI daemon"
 LABEL org.opencontainers.image.source="https://github.com/BrendanL79/ium"
 LABEL org.opencontainers.image.licenses="MIT"
-
-# Copy only the docker CLI binary from official image
-COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 
 # Create app directory
 WORKDIR /app
@@ -21,7 +14,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the application
-COPY ium.py pattern_utils.py ./
+COPY ium.py pattern_utils.py docker_api.py ./
 
 # Create directories for config and state
 RUN mkdir -p /config /state

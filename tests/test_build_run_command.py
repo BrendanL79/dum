@@ -1,4 +1,4 @@
-"""Tests for _build_run_command container recreation logic."""
+"""Tests for _build_create_config container recreation logic."""
 
 import pytest
 
@@ -7,7 +7,7 @@ from ium import DockerImageUpdater
 
 @pytest.fixture
 def updater(tmp_path):
-    """Create a minimal updater for testing _build_run_command."""
+    """Create a minimal updater for testing _build_create_config."""
     config_file = tmp_path / "config.json"
     config_file.write_text('{"images": []}')
     return DockerImageUpdater(str(config_file), str(tmp_path / "state.json"))
@@ -68,12 +68,12 @@ class TestComposeLabels:
                 'com.docker.compose.project.working_dir': '/data/compose/8',
             },
         })
-        cmd = updater._build_run_command('sabnzbd', 'linuxserver/sabnzbd:latest', info)
-        labels = {cmd[i + 1] for i in range(len(cmd)) if cmd[i] == '--label'}
+        config, _ = updater._build_create_config('sabnzbd', 'linuxserver/sabnzbd:latest', info)
+        labels = config.get('Labels', {})
 
-        assert 'com.docker.compose.project=vpn_downloader_stack' in labels
-        assert 'com.docker.compose.service=sabnzbd' in labels
-        assert 'com.docker.compose.container-number=1' in labels
+        assert labels.get('com.docker.compose.project') == 'vpn_downloader_stack'
+        assert labels.get('com.docker.compose.service') == 'sabnzbd'
+        assert labels.get('com.docker.compose.container-number') == '1'
 
     def test_non_compose_docker_labels_skipped(self, updater):
         info = _make_container_info(Config={
@@ -87,15 +87,15 @@ class TestComposeLabels:
                 'custom.label': 'value',
             },
         })
-        cmd = updater._build_run_command('test', 'image:latest', info)
-        labels = {cmd[i + 1] for i in range(len(cmd)) if cmd[i] == '--label'}
+        config, _ = updater._build_create_config('test', 'image:latest', info)
+        labels = config.get('Labels', {})
 
         # compose label kept
-        assert 'com.docker.compose.project=mystack' in labels
+        assert labels.get('com.docker.compose.project') == 'mystack'
         # custom label kept
-        assert 'custom.label=value' in labels
+        assert labels.get('custom.label') == 'value'
         # desktop label dropped
-        assert 'com.docker.desktop.plugin=true' not in labels
+        assert 'com.docker.desktop.plugin' not in labels
 
     def test_no_compose_labels_still_works(self, updater):
         """Containers not from compose should work fine with no compose labels."""
@@ -106,9 +106,9 @@ class TestComposeLabels:
             'Cmd': None,
             'Labels': {'maintainer': 'test'},
         })
-        cmd = updater._build_run_command('test', 'image:latest', info)
-        labels = {cmd[i + 1] for i in range(len(cmd)) if cmd[i] == '--label'}
-        assert 'maintainer=test' in labels
+        config, _ = updater._build_create_config('test', 'image:latest', info)
+        labels = config.get('Labels', {})
+        assert labels.get('maintainer') == 'test'
 
 
 class TestNetworkModeConstraints:
@@ -121,9 +121,8 @@ class TestNetworkModeConstraints:
             'Env': ['PATH=/usr/bin:/bin'],
             'Cmd': None, 'Labels': {},
         })
-        cmd = updater._build_run_command('test', 'image:latest', info)
-        assert '--hostname' in cmd
-        assert 'myhost' in cmd
+        config, _ = updater._build_create_config('test', 'image:latest', info)
+        assert config.get('Hostname') == 'myhost'
 
     def test_container_network_skips_hostname(self, updater):
         info = _make_container_info(
@@ -142,11 +141,9 @@ class TestNetworkModeConstraints:
                 'CpuQuota': 0, 'SecurityOpt': None, 'Runtime': '',
             },
         )
-        cmd = updater._build_run_command('qbittorrent', 'linuxserver/qbittorrent:latest', info)
-        assert '--hostname' not in cmd
-        assert '--network' in cmd
-        idx = cmd.index('--network')
-        assert cmd[idx + 1] == 'container:a1_vpn'
+        config, _ = updater._build_create_config('qbittorrent', 'linuxserver/qbittorrent:latest', info)
+        assert 'Hostname' not in config
+        assert config.get('HostConfig', {}).get('NetworkMode') == 'container:a1_vpn'
 
     def test_host_network_skips_hostname(self, updater):
         info = _make_container_info(
@@ -165,8 +162,8 @@ class TestNetworkModeConstraints:
                 'CpuQuota': 0, 'SecurityOpt': None, 'Runtime': '',
             },
         )
-        cmd = updater._build_run_command('pihole', 'pihole/pihole:latest', info)
-        assert '--hostname' not in cmd
+        config, _ = updater._build_create_config('pihole', 'pihole/pihole:latest', info)
+        assert 'Hostname' not in config
 
     def test_container_network_skips_ports(self, updater):
         info = _make_container_info(
@@ -185,8 +182,8 @@ class TestNetworkModeConstraints:
                 'CpuQuota': 0, 'SecurityOpt': None, 'Runtime': '',
             },
         )
-        cmd = updater._build_run_command('qbittorrent', 'linuxserver/qbittorrent:latest', info)
-        assert '-p' not in cmd
+        config, _ = updater._build_create_config('qbittorrent', 'linuxserver/qbittorrent:latest', info)
+        assert 'PortBindings' not in config.get('HostConfig', {})
 
     def test_host_network_skips_ports(self, updater):
         info = _make_container_info(
@@ -205,8 +202,8 @@ class TestNetworkModeConstraints:
                 'CpuQuota': 0, 'SecurityOpt': None, 'Runtime': '',
             },
         )
-        cmd = updater._build_run_command('pihole', 'pihole/pihole:latest', info)
-        assert '-p' not in cmd
+        config, _ = updater._build_create_config('pihole', 'pihole/pihole:latest', info)
+        assert 'PortBindings' not in config.get('HostConfig', {})
 
     def test_container_network_skips_additional_networks(self, updater):
         info = _make_container_info(
@@ -226,10 +223,10 @@ class TestNetworkModeConstraints:
             },
             NetworkSettings={'Networks': {'bridge': {}, 'custom_net': {}}},
         )
-        cmd = updater._build_run_command('test', 'image:latest', info)
-        network_args = [cmd[i + 1] for i in range(len(cmd)) if cmd[i] == '--network']
-        # Only the primary network mode, no additional networks
-        assert network_args == ['container:a1_vpn']
+        config, extra_networks = updater._build_create_config('test', 'image:latest', info)
+        # container: network mode — no additional networks
+        assert extra_networks == []
+        assert config.get('HostConfig', {}).get('NetworkMode') == 'container:a1_vpn'
 
     def test_default_network_includes_ports(self, updater):
         info = _make_container_info(
@@ -248,10 +245,10 @@ class TestNetworkModeConstraints:
                 'CpuQuota': 0, 'SecurityOpt': None, 'Runtime': '',
             },
         )
-        cmd = updater._build_run_command('test', 'image:latest', info)
-        assert '-p' in cmd
-        idx = cmd.index('-p')
-        assert cmd[idx + 1] == '8080:8080/tcp'
+        config, _ = updater._build_create_config('test', 'image:latest', info)
+        port_bindings = config.get('HostConfig', {}).get('PortBindings', {})
+        assert '8080/tcp' in port_bindings
+        assert port_bindings['8080/tcp'] == [{'HostIp': '', 'HostPort': '8080'}]
 
     def test_bridge_network_includes_hostname_and_ports(self, updater):
         """Named bridge networks are NOT shared namespaces."""
@@ -271,6 +268,6 @@ class TestNetworkModeConstraints:
                 'CpuQuota': 0, 'SecurityOpt': None, 'Runtime': '',
             },
         )
-        cmd = updater._build_run_command('test', 'image:latest', info)
-        assert '--hostname' in cmd
-        assert '-p' in cmd
+        config, _ = updater._build_create_config('test', 'image:latest', info)
+        assert config.get('Hostname') == 'myapp'
+        assert '3000/tcp' in config.get('HostConfig', {}).get('PortBindings', {})
