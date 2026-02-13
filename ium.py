@@ -11,6 +11,7 @@ __version__ = "1.0.0"
 
 import json
 import re
+import secrets
 import sys
 import time
 import logging
@@ -112,6 +113,86 @@ def _validate_regex(pattern: str, timeout: float = 2.0) -> re.Pattern:
         raise ValueError(f"Regex pattern '{pattern}' failed test: {error[0]}")
 
     return compiled
+
+
+class AuthManager:
+    """Manages web UI credentials with auto-generated secure defaults.
+
+    Priority order:
+    1. WEBUI_USER / WEBUI_PASSWORD environment variables
+    2. Credentials stored in <state_dir>/.auth.json
+    3. Auto-generated credentials (first run only)
+    """
+
+    AUTH_FILE = ".auth.json"
+
+    def __init__(self, state_dir: Path):
+        self.state_dir = Path(state_dir)
+        self.user: str = ""
+        self.password: str = ""
+        self._load()
+
+    def _load(self) -> None:
+        env_user = os.environ.get('WEBUI_USER', '').strip()
+        env_password = os.environ.get('WEBUI_PASSWORD', '').strip()
+        if env_user and env_password:
+            self.user = env_user
+            self.password = env_password
+            logging.getLogger(__name__).info(
+                "Web UI authentication: using credentials from environment variables"
+            )
+            return
+
+        auth_file = self.state_dir / self.AUTH_FILE
+        if auth_file.exists():
+            try:
+                with open(auth_file, 'r') as f:
+                    data = json.load(f)
+                self.user = data['username']
+                self.password = data['password']
+                logging.getLogger(__name__).info(
+                    "Web UI authentication: loaded stored credentials"
+                )
+                return
+            except (json.JSONDecodeError, KeyError, IOError) as e:
+                logging.getLogger(__name__).warning(
+                    f"Could not load auth file, regenerating: {e}"
+                )
+
+        self.user = "admin"
+        self.password = secrets.token_urlsafe(16)
+        self._store(auth_file, first_run=True)
+
+    def _store(self, auth_file: Path, first_run: bool = False) -> None:
+        """Atomically write credentials with owner-only permissions."""
+        log = logging.getLogger(__name__)
+        try:
+            auth_file.parent.mkdir(parents=True, exist_ok=True)
+            data = {"version": 1, "username": self.user, "password": self.password}
+            tmp = auth_file.with_suffix('.tmp')
+            with open(tmp, 'w') as f:
+                json.dump(data, f, indent=2)
+            os.chmod(tmp, 0o600)
+            tmp.rename(auth_file)
+
+            if first_run:
+                sep = "=" * 48
+                log.info(
+                    "\n%s\n IUM Web UI - Auto-Generated Credentials\n%s\n"
+                    " Username: %s\n Password: %s\n\n"
+                    " Stored in: %s\n"
+                    " To override, set WEBUI_USER and WEBUI_PASSWORD env vars.\n%s",
+                    sep, sep, self.user, self.password, auth_file, sep
+                )
+        except (IOError, OSError) as e:
+            log.error("Could not persist auth credentials: %s", e)
+            if first_run:
+                log.warning(
+                    "IUM Web UI credentials (not persisted):\n"
+                    "  Username: %s\n  Password: %s\n"
+                    "  Set WEBUI_USER and WEBUI_PASSWORD to avoid regeneration on restart.",
+                    self.user, self.password
+                )
 
 
 @dataclass
