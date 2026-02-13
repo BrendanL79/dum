@@ -5,9 +5,6 @@ LABEL org.opencontainers.image.description="Image Update Manager"
 LABEL org.opencontainers.image.source="https://github.com/BrendanL79/ium"
 LABEL org.opencontainers.image.licenses="MIT"
 
-# Install curl for healthcheck
-RUN apk add --no-cache curl
-
 # Create app directory
 WORKDIR /app
 
@@ -38,7 +35,7 @@ EXPOSE 5050
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD curl -f http://localhost:5050/api/status || exit 1
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5050/api/status')" || exit 1
 
 # Run the web UI with gunicorn
 CMD ["gunicorn", "--worker-class", "geventwebsocket.gunicorn.workers.GeventWebSocketWorker", "-w", "1", "--bind", "0.0.0.0:5050", "webui:app"]
