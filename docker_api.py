@@ -205,9 +205,10 @@ class DockerClient:
         """Start an existing container."""
         self._request("POST", f"/containers/{name}/start")
 
-    def remove_container(self, name: str) -> None:
+    def remove_container(self, name: str, force: bool = False, timeout: int = 30) -> None:
         """Remove a container."""
-        self._request("DELETE", f"/containers/{name}")
+        query = {"force": "true"} if force else None
+        self._request("DELETE", f"/containers/{name}", query=query, timeout=timeout)
 
     # ── Network operations ────────────────────────────────────────
 

@@ -946,7 +946,7 @@ class DockerImageUpdater:
 
             # Success - remove old container
             self.logger.info(f"Removing old container {backup_name}")
-            self.docker.remove_container(backup_name)
+            self.docker.remove_container(backup_name, force=True, timeout=60)
 
             self.logger.info(f"Successfully updated container {container_name}")
             return True
