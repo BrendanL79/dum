@@ -600,18 +600,30 @@ class DockerImageUpdater:
         self.logger.error(f"Could not get digest for latest matching tag {image}:{latest_tag}")
         return None
         
-    def _pull_image(self, image: str, tag: str) -> bool:
+    def _pull_image(self, image: str, tag: str,
+                    registry: Optional[str] = None) -> bool:
         """
         Pull a Docker image.
 
         Args:
             image: Image name
             tag: Tag to pull
+            registry: Optional registry override (e.g. 'ghcr.io').  When set
+                      and not already embedded in *image*, it is prepended so
+                      the Docker daemon pulls from the correct registry rather
+                      than defaulting to Docker Hub.
 
         Returns:
             True if successful, False otherwise
         """
-        full_image = f"{image}:{tag}"
+        # Qualify image name with registry when the daemon needs it
+        pull_image = image
+        if registry and registry != DEFAULT_REGISTRY:
+            first = image.split('/')[0]
+            if '.' not in first and first != 'localhost' and ':' not in first:
+                pull_image = f"{registry}/{image}"
+
+        full_image = f"{pull_image}:{tag}"
 
         if self.dry_run:
             self.logger.info(f"[DRY RUN] Would pull {full_image}")
@@ -620,7 +632,7 @@ class DockerImageUpdater:
         self.logger.info(f"Pulling {full_image}...")
 
         try:
-            self.docker.pull_image(image, tag)
+            self.docker.pull_image(pull_image, tag)
             self.logger.info(f"Successfully pulled {full_image}")
             return True
         except DockerAPIError as e:
@@ -1153,8 +1165,8 @@ class DockerImageUpdater:
                     update_ok = True
                     if auto_update:
                         # Pull the new images
-                        if self._pull_image(image, base_tag):
-                            self._pull_image(image, matching_tag)
+                        if self._pull_image(image, base_tag, registry):
+                            self._pull_image(image, matching_tag, registry)
 
                             if containers:
                                 # Update all discovered containers
@@ -1211,8 +1223,8 @@ class DockerImageUpdater:
                     update_ok = True
                     if auto_update:
                         # Pull the fresh image
-                        if self._pull_image(image, base_tag):
-                            self._pull_image(image, matching_tag)
+                        if self._pull_image(image, base_tag, registry):
+                            self._pull_image(image, matching_tag, registry)
 
                             if containers:
                                 container_names = [c['name'] for c in containers]
