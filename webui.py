@@ -456,4 +456,4 @@ restore_daemon_state()
 
 if __name__ == '__main__':
     # For local development only
-    socketio.run(app, host='0.0.0.0', port=5050, debug=True)
+    socketio.run(app, host='0.0.0.0', port=5050)

@@ -1,2 +1,4 @@
 __pycache__/
 claude-session-*.txt
+config/config.json
+state/
