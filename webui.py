@@ -23,6 +23,7 @@ from flask import Flask, render_template, jsonify, request, Response
 from flask_socketio import SocketIO, emit
 
 from ium import DockerImageUpdater, CONFIG_SCHEMA, __version__, _validate_regex, AuthManager
+from notify import send_ntfy, send_webhook, _build_payload
 from pattern_utils import detect_tag_patterns, detect_base_tags
 
 app = Flask(__name__)
@@ -362,6 +363,37 @@ def api_detect_patterns():
     except Exception as e:
         logger.error(f"Pattern detection failed: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/notifications/test', methods=['POST'])
+@require_updater
+def api_notifications_test():
+    """Fire a test notification for a specific notifier type."""
+    data = request.json or {}
+    notif_type = data.get('type')
+    if notif_type not in ('ntfy', 'webhook'):
+        return jsonify({'error': 'type must be "ntfy" or "webhook"'}), 400
+
+    notif_cfg = updater.config.get('notifications') or {}
+    channel_cfg = notif_cfg.get(notif_type)
+    if not channel_cfg or not channel_cfg.get('url'):
+        return jsonify({'error': f'{notif_type} is not configured — save a URL first'}), 400
+
+    test_payload = _build_payload(
+        image='example/image',
+        old_version='v1.0.0',
+        new_version='v1.1.0',
+        event='update_found',
+        digest='sha256:abc123',
+        auto_update=False
+    )
+
+    ok = (send_ntfy(channel_cfg, test_payload) if notif_type == 'ntfy'
+          else send_webhook(channel_cfg, test_payload))
+
+    if ok:
+        return jsonify({'status': 'sent'})
+    return jsonify({'error': f'Failed to send {notif_type} test — check logs for details'}), 500
 
 
 @app.route('/api/state')

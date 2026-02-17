@@ -7,7 +7,7 @@ This script monitors Docker images for updates by comparing a base tag
 tags that match user-defined regex patterns.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 import json
 import re
@@ -30,6 +30,7 @@ import jsonschema
 
 from pattern_utils import detect_tag_patterns, detect_base_tags
 from docker_api import DockerClient, DockerAPIError
+from notify import send_notifications
 
 # Platform-specific imports and constant
 IS_WINDOWS = platform.system() == 'Windows'
@@ -75,6 +76,39 @@ CONFIG_SCHEMA = {
                     "keep_versions": {"type": "integer", "minimum": 1}
                 },
                 "required": ["image", "regex"]
+            }
+        },
+        "notifications": {
+            "type": "object",
+            "properties": {
+                "ntfy": {
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string"},
+                        "priority": {
+                            "type": "string",
+                            "enum": ["min", "low", "default", "high", "urgent"]
+                        },
+                        "headers": {
+                            "type": "object",
+                            "additionalProperties": {"type": "string"}
+                        }
+                    },
+                    "required": ["url"]
+                },
+                "webhook": {
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string"},
+                        "method": {"type": "string"},
+                        "headers": {
+                            "type": "object",
+                            "additionalProperties": {"type": "string"}
+                        },
+                        "body_template": {"type": "string"}
+                    },
+                    "required": ["url"]
+                }
             }
         }
     },
@@ -1260,6 +1294,12 @@ class DockerImageUpdater:
                     if progress_callback:
                         progress_callback('update_found', update_info)
 
+                    send_notifications(
+                        self.config.get('notifications'),
+                        image=image, old_version=old_tag, new_version=matching_tag,
+                        event='update_found', digest=digest, auto_update=auto_update
+                    )
+
                     update_ok = True
                     if auto_update:
                         # Pull the new images
@@ -1317,6 +1357,12 @@ class DockerImageUpdater:
                             'image': image,
                             'tag': matching_tag
                         })
+
+                    send_notifications(
+                        self.config.get('notifications'),
+                        image=image, old_version=matching_tag, new_version=matching_tag,
+                        event='image_rebuilt', digest=digest, auto_update=auto_update
+                    )
 
                     update_ok = True
                     if auto_update:
