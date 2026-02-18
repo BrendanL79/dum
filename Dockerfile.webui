@@ -16,7 +16,7 @@ RUN apk add --no-cache --virtual .build-deps gcc musl-dev linux-headers \
     && apk del .build-deps
 
 # Copy the application files
-COPY ium.py webui.py pattern_utils.py docker_api.py ./
+COPY ium.py webui.py pattern_utils.py docker_api.py notify.py ./
 COPY templates templates/
 COPY static static/
 

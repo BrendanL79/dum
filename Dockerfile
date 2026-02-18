@@ -14,7 +14,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the application
-COPY ium.py pattern_utils.py docker_api.py ./
+COPY ium.py pattern_utils.py docker_api.py notify.py ./
 
 # Create directories for config and state
 RUN mkdir -p /config /state
