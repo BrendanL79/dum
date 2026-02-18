@@ -26,6 +26,49 @@ let socket;
 let isDaemonRunning = false;
 let imageConfigs = [];  // Array of image config objects
 
+// ── Theme management ─────────────────────────────────────────────────────
+const THEME_KEY = 'ium-theme'; // values: 'light', 'dark', 'system'
+
+function getSystemPrefersDark() {
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
+function applyTheme(preference) {
+    // preference: 'light' | 'dark' | 'system'
+    const isDark = preference === 'dark' || (preference === 'system' && getSystemPrefersDark());
+    document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+}
+
+function initTheme() {
+    const saved = localStorage.getItem(THEME_KEY) || 'system';
+    applyTheme(saved);
+
+    // Listen for OS preference changes when in system mode
+    if (window.matchMedia) {
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+            const current = localStorage.getItem(THEME_KEY) || 'system';
+            if (current === 'system') applyTheme('system');
+        });
+    }
+}
+
+function cycleTheme() {
+    // Cycle: system → light → dark → system
+    const current = localStorage.getItem(THEME_KEY) || 'system';
+    const next = current === 'system' ? 'light' : current === 'light' ? 'dark' : 'system';
+    localStorage.setItem(THEME_KEY, next);
+    applyTheme(next);
+    updateThemeToggleLabel(next);
+}
+
+function updateThemeToggleLabel(preference) {
+    const btn = document.getElementById('theme-toggle');
+    if (!btn) return;
+    const labels = { system: '◑', light: '☀', dark: '☽' };
+    btn.textContent = labels[preference] || '◑';
+    btn.title = `Theme: ${preference} — click to change`;
+}
+
 // Cached DOM elements (initialized in DOMContentLoaded)
 const dom = {};
 
@@ -1084,6 +1127,9 @@ function switchTab(tabName) {
 
 // Initialize everything when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
+    initTheme();
+    updateThemeToggleLabel(localStorage.getItem(THEME_KEY) || 'system');
+
     // Cache frequently accessed DOM elements
     dom.statusIndicator = document.getElementById('status-indicator');
     dom.statusText = document.getElementById('status-text');
@@ -1101,6 +1147,7 @@ document.addEventListener('DOMContentLoaded', () => {
     dom.historyList = document.getElementById('history-list');
     dom.daemonInterval = document.getElementById('daemon-interval');
     dom.appVersion = document.getElementById('app-version');
+    document.getElementById('theme-toggle').addEventListener('click', cycleTheme);
     dom.ntfyUrl = document.getElementById('ntfy-url');
     dom.ntfyPriority = document.getElementById('ntfy-priority');
     dom.ntfyTestStatus = document.getElementById('ntfy-test-status');
