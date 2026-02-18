@@ -217,9 +217,78 @@ async function loadConfig() {
         const config = await response.json();
         imageConfigs = config.images || [];
         renderImageCards();
+        loadNotificationConfig(config.notifications || {});
     } catch (error) {
         addLog('Failed to load config: ' + error, 'error');
     }
+}
+
+// Populate notification fields from saved config
+function loadNotificationConfig(notif) {
+    const ntfy = notif.ntfy || {};
+    const webhook = notif.webhook || {};
+    dom.ntfyUrl.value = ntfy.url || '';
+    dom.ntfyPriority.value = ntfy.priority || 'default';
+    dom.webhookUrl.value = webhook.url || '';
+    dom.webhookMethod.value = webhook.method || 'POST';
+    dom.webhookBodyTemplate.value = webhook.body_template || '';
+}
+
+// Collect notification config from the UI fields
+function collectNotificationConfig() {
+    const notif = {};
+
+    const ntfyUrl = dom.ntfyUrl.value.trim();
+    if (ntfyUrl) {
+        notif.ntfy = { url: ntfyUrl };
+        const priority = dom.ntfyPriority.value;
+        if (priority && priority !== 'default') {
+            notif.ntfy.priority = priority;
+        }
+    }
+
+    const webhookUrl = dom.webhookUrl.value.trim();
+    if (webhookUrl) {
+        notif.webhook = { url: webhookUrl };
+        const method = dom.webhookMethod.value;
+        if (method && method !== 'POST') {
+            notif.webhook.method = method;
+        }
+        const bodyTemplate = dom.webhookBodyTemplate.value.trim();
+        if (bodyTemplate) {
+            notif.webhook.body_template = bodyTemplate;
+        }
+    }
+
+    return notif;
+}
+
+// Send a test notification for a given channel type
+async function testNotification(type) {
+    const statusEl = type === 'ntfy' ? dom.ntfyTestStatus : dom.webhookTestStatus;
+    statusEl.textContent = 'Sending…';
+    statusEl.className = 'detect-status loading';
+
+    try {
+        const response = await fetch('/api/notifications/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+            body: JSON.stringify({ type })
+        });
+        const data = await response.json();
+        if (response.ok) {
+            statusEl.textContent = 'Sent!';
+            statusEl.className = 'detect-status success';
+        } else {
+            statusEl.textContent = data.error || 'Failed';
+            statusEl.className = 'detect-status error';
+        }
+    } catch (e) {
+        statusEl.textContent = 'Network error';
+        statusEl.className = 'detect-status error';
+    }
+
+    setTimeout(() => { statusEl.textContent = ''; statusEl.className = ''; }, 5000);
 }
 
 // Render all image cards
@@ -853,11 +922,17 @@ async function saveConfig() {
         return;
     }
 
+    const payload = { images: configs };
+    const notifications = collectNotificationConfig();
+    if (Object.keys(notifications).length > 0) {
+        payload.notifications = notifications;
+    }
+
     try {
         const response = await fetch('/api/config', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-            body: JSON.stringify({ images: configs })
+            body: JSON.stringify(payload)
         });
 
         if (response.ok) {
@@ -1026,6 +1101,13 @@ document.addEventListener('DOMContentLoaded', () => {
     dom.historyList = document.getElementById('history-list');
     dom.daemonInterval = document.getElementById('daemon-interval');
     dom.appVersion = document.getElementById('app-version');
+    dom.ntfyUrl = document.getElementById('ntfy-url');
+    dom.ntfyPriority = document.getElementById('ntfy-priority');
+    dom.ntfyTestStatus = document.getElementById('ntfy-test-status');
+    dom.webhookUrl = document.getElementById('webhook-url');
+    dom.webhookMethod = document.getElementById('webhook-method');
+    dom.webhookBodyTemplate = document.getElementById('webhook-body-template');
+    dom.webhookTestStatus = document.getElementById('webhook-test-status');
 
     // Load version into footer
     fetch('/api/version').then(r => r.json()).then(data => {
@@ -1041,6 +1123,8 @@ document.addEventListener('DOMContentLoaded', () => {
     dom.saveConfigBtn.addEventListener('click', saveConfig);
     dom.addImageBtn.addEventListener('click', addNewImage);
     document.getElementById('add-preset').addEventListener('click', showPresetModal);
+    document.getElementById('test-ntfy').addEventListener('click', () => testNotification('ntfy'));
+    document.getElementById('test-webhook').addEventListener('click', () => testNotification('webhook'));
 
     // Tab switching
     document.querySelectorAll('.tab-button').forEach(btn => {
