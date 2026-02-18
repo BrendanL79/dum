@@ -531,3 +531,91 @@ class TestAuthManager:
         assert data["version"] == 1
         assert data["username"] == am.user
         assert data["password"] == am.password
+
+
+# ---------------------------------------------------------------------------
+# POST /api/apply-update
+# ---------------------------------------------------------------------------
+
+class TestApplyUpdate:
+    """Tests for the manual apply-update endpoint."""
+
+    def test_apply_update_missing_fields(self, app_client):
+        """Returns 400 when required fields are missing."""
+        resp = _post_json(app_client, '/api/apply-update', {})
+        assert resp.status_code == 400
+        assert 'error' in resp.get_json()
+
+    def test_apply_update_image_not_in_last_updates(self, app_client):
+        """Returns 404 when no pending update exists for the image."""
+        resp = _post_json(app_client, '/api/apply-update', {
+            'image': 'nonexistent/image',
+            'new_tag': '1.0.0'
+        })
+        assert resp.status_code == 404
+        assert 'error' in resp.get_json()
+
+    def test_apply_update_success(self, app_client, monkeypatch):
+        """Returns 200 and applies the update when a valid update is pending."""
+        import webui as webui_mod
+
+        # Seed a pending update into last_updates
+        monkeypatch.setattr(webui_mod, 'last_updates', [{
+            'image': 'nginx',
+            'base_tag': 'latest',
+            'old_tag': '1.26.0',
+            'new_tag': '1.27.0',
+            'digest': 'sha256:abc123',
+            'auto_update': False
+        }])
+
+        # Mock the updater methods to avoid real Docker calls
+        mock_pull = MagicMock(return_value=True)
+        mock_get_containers = MagicMock(return_value=[{'name': 'my-nginx'}])
+        mock_update_containers = MagicMock(return_value={'my-nginx': True})
+        mock_get_config = MagicMock(return_value={
+            'image': 'nginx',
+            'regex': r'^[0-9]+\.[0-9]+\.[0-9]+$',
+            'base_tag': 'latest',
+            'registry': None,
+            'cleanup_old_images': False,
+            'keep_versions': 3
+        })
+
+        monkeypatch.setattr(webui_mod.updater, '_pull_image', mock_pull)
+        monkeypatch.setattr(webui_mod.updater, '_get_containers_for_image', mock_get_containers)
+        monkeypatch.setattr(webui_mod.updater, '_update_containers', mock_update_containers)
+
+        resp = _post_json(app_client, '/api/apply-update', {
+            'image': 'nginx',
+            'new_tag': '1.27.0'
+        })
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['success'] is True
+        mock_pull.assert_called()
+        mock_update_containers.assert_called_once_with(['my-nginx'], 'nginx', '1.27.0', None)
+
+    def test_apply_update_pull_failure(self, app_client, monkeypatch):
+        """Returns 500 when image pull fails."""
+        import webui as webui_mod
+
+        monkeypatch.setattr(webui_mod, 'last_updates', [{
+            'image': 'nginx', 'base_tag': 'latest',
+            'old_tag': '1.26.0', 'new_tag': '1.27.0',
+            'digest': 'sha256:abc', 'auto_update': False
+        }])
+        monkeypatch.setattr(webui_mod.updater, '_pull_image', MagicMock(return_value=False))
+
+        resp = _post_json(app_client, '/api/apply-update', {
+            'image': 'nginx', 'new_tag': '1.27.0'
+        })
+        assert resp.status_code == 500
+        assert 'error' in resp.get_json()
+
+    def test_apply_update_requires_csrf(self, app_client):
+        """Rejects request without CSRF header."""
+        resp = app_client.post('/api/apply-update',
+                               data=json.dumps({'image': 'nginx', 'new_tag': '1.0.0'}),
+                               content_type='application/json')
+        assert resp.status_code == 403

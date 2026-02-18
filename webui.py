@@ -436,6 +436,76 @@ def api_history():
     return jsonify(update_history[-limit:])
 
 
+@app.route('/api/apply-update', methods=['POST'])
+@require_updater
+def api_apply_update():
+    """Manually apply a specific pending update."""
+    data = request.json or {}
+    image = data.get('image', '').strip()
+    new_tag = data.get('new_tag', '').strip()
+
+    if not image or not new_tag:
+        return jsonify({'error': 'image and new_tag are required'}), 400
+
+    # Find the pending update in last_updates
+    update_info = next(
+        (u for u in last_updates if u['image'] == image and u['new_tag'] == new_tag),
+        None
+    )
+    if not update_info:
+        return jsonify({'error': f'No pending update found for {image}:{new_tag}'}), 404
+
+    # Get image config for registry and cleanup settings
+    image_config = next(
+        (c for c in updater.config.get('images', []) if c['image'] == image),
+        {}
+    )
+    base_tag = update_info.get('base_tag', 'latest')
+    registry = image_config.get('registry') or update_info.get('registry')
+
+    try:
+        # Pull base tag and new tag
+        if not updater._pull_image(image, base_tag, registry):
+            return jsonify({'error': f'Failed to pull {image}:{base_tag}'}), 500
+        updater._pull_image(image, new_tag, registry)
+
+        # Discover and update containers
+        containers = updater._get_containers_for_image(image)
+        if containers:
+            container_names = [c['name'] for c in containers]
+            results = updater._update_containers(container_names, image, new_tag, registry)
+            if not any(results.values()):
+                return jsonify({'error': 'All container updates failed'}), 500
+
+        # Update state
+        from ium import ImageState
+        updater.state[image] = ImageState(
+            base_tag=base_tag,
+            tag=new_tag,
+            digest=update_info.get('digest', ''),
+            last_updated=datetime.now().isoformat()
+        )
+        if not updater.dry_run:
+            updater._save_state()
+
+        # Record in history
+        update_history.append({
+            'timestamp': datetime.now().isoformat(),
+            'image': image,
+            'old_tag': update_info.get('old_tag', 'unknown'),
+            'new_tag': new_tag,
+            'applied': True
+        })
+        save_history()
+
+        logger.info(f"Manually applied update: {image} \u2192 {new_tag}")
+        return jsonify({'success': True, 'image': image, 'new_tag': new_tag})
+
+    except Exception as e:
+        logger.error(f"apply-update failed for {image}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/daemon', methods=['POST'])
 def api_daemon():
     """Start/stop daemon mode."""
