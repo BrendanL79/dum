@@ -272,18 +272,19 @@ class DockerImageUpdater:
         
     def _setup_logging(self, level: str) -> logging.Logger:
         """Setup logging configuration."""
-        logger = logging.getLogger('DockerImageUpdater')
+        logger = logging.getLogger('ium')
         logger.setLevel(getattr(logging, level.upper()))
-        
+        logger.propagate = False
+
         if not logger.handlers:
             handler = logging.StreamHandler()
             formatter = logging.Formatter(
-                '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                '%(asctime)s - [%(name)s] - %(levelname)s - %(message)s',
                 datefmt='%Y-%m-%d %H:%M:%S %Z'
             )
             handler.setFormatter(formatter)
             logger.addHandler(handler)
-            
+
         return logger
         
     def _load_config(self) -> Dict[str, Any]:
