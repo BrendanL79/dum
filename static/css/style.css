@@ -882,3 +882,111 @@ h1 {
     margin-top: 8px;
 }
 
+/* ── Toast Notifications ─────────────────────────────────────────────────── */
+.toast-container {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 2000;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: none;
+}
+
+.toast {
+    padding: 12px 20px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    color: white;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity 0.25s ease, transform 0.25s ease;
+    pointer-events: auto;
+}
+
+.toast.toast-show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.toast.toast-success { background: var(--success-color); }
+.toast.toast-error   { background: var(--danger-color); }
+.toast.toast-info    { background: var(--primary-color); }
+
+/* ── Unsaved Changes Banner ──────────────────────────────────────────────── */
+.unsaved-banner {
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    color: #856404;
+    padding: 10px 16px;
+    border-radius: 6px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 14px;
+}
+
+[data-theme="dark"] .unsaved-banner {
+    background: #3d2e00;
+    border-color: #ffa726;
+    color: #ffd54f;
+}
+
+/* ── Apply Update Button ─────────────────────────────────────────────────── */
+.btn-apply {
+    background-color: var(--primary-color);
+    color: white;
+    min-width: 110px;
+}
+
+.btn-apply:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
+.btn-apply.applied {
+    background-color: var(--success-color);
+    cursor: default;
+}
+
+.update-item.applied {
+    border-left-color: var(--success-color);
+    opacity: 0.8;
+}
+
+.update-error {
+    color: var(--danger-color);
+    font-size: 13px;
+    margin-top: 6px;
+}
+
+.update-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+/* ── Config Empty State ──────────────────────────────────────────────────── */
+.config-empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-secondary);
+}
+
+.config-empty-state p {
+    margin-bottom: 20px;
+    font-size: 15px;
+}
+
+.config-empty-state .empty-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
