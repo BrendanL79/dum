@@ -231,6 +231,32 @@ function handleCheckComplete(data) {
     loadHistory();
 }
 
+// Show a transient toast notification
+function showToast(message, type = 'info', durationMs = 3000) {
+    let container = document.getElementById('toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        container.className = 'toast-container';
+        document.body.appendChild(container);
+    }
+
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+
+    // Trigger animation
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => toast.classList.add('toast-show'));
+    });
+
+    setTimeout(() => {
+        toast.classList.remove('toast-show');
+        toast.addEventListener('transitionend', () => toast.remove(), { once: true });
+    }, durationMs);
+}
+
 // Display available updates
 function displayUpdates(updates) {
     dom.updateList.innerHTML = '';
@@ -238,16 +264,78 @@ function displayUpdates(updates) {
     updates.forEach(update => {
         const item = document.createElement('div');
         item.className = 'update-item';
+        item.dataset.image = update.image;
+        item.dataset.newTag = update.new_tag;
+
+        const autoUpdateBadge = update.auto_update
+            ? '<span class="badge badge-auto-update">Auto-update enabled</span>'
+            : `<button class="btn btn-apply" data-image="${escapeHtml(update.image)}" data-new-tag="${escapeHtml(update.new_tag)}">Apply Update</button>`;
+
         item.innerHTML = `
-            <h3>${update.image}</h3>
-            <div class="update-details">
-                <span>Base tag: <strong>${update.base_tag}</strong></span>
-                <span class="tag-change">${update.old_tag} → ${update.new_tag}</span>
-                <span>Digest: ${update.digest.substring(0, 12)}...</span>
+            <div class="update-item-header">
+                <div>
+                    <h3>${escapeHtml(update.image)}</h3>
+                    <div class="update-details">
+                        <span>Base tag: <strong>${escapeHtml(update.base_tag)}</strong></span>
+                        <span class="tag-change">${escapeHtml(update.old_tag)} → ${escapeHtml(update.new_tag)}</span>
+                        <span>Digest: ${escapeHtml(update.digest.substring(0, 12))}...</span>
+                    </div>
+                </div>
+                <div>${autoUpdateBadge}</div>
             </div>
+            <div class="update-error" style="display:none"></div>
         `;
+
         dom.updateList.appendChild(item);
     });
+
+    // Wire up Apply buttons
+    dom.updateList.querySelectorAll('.btn-apply').forEach(btn => {
+        btn.addEventListener('click', () => applyUpdate(btn));
+    });
+}
+
+async function applyUpdate(btn) {
+    const image = btn.dataset.image;
+    const newTag = btn.dataset.newTag;
+    const item = btn.closest('.update-item');
+    const errorEl = item.querySelector('.update-error');
+
+    // Spinner state
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = 'Applying\u2026';
+    errorEl.style.display = 'none';
+
+    try {
+        const response = await fetch('/api/apply-update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+            body: JSON.stringify({ image, new_tag: newTag })
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            btn.textContent = '\u2713 Applied';
+            btn.classList.add('applied');
+            item.classList.add('applied');
+            item.style.borderLeftColor = 'var(--success-color)';
+            showToast(`${image} updated to ${newTag}`, 'success');
+            addLog(`Manually applied: ${image} \u2192 ${newTag}`, 'success');
+        } else {
+            btn.textContent = originalText;
+            btn.disabled = false;
+            errorEl.textContent = data.error || 'Update failed';
+            errorEl.style.display = 'block';
+            showToast(`Update failed: ${data.error || 'unknown error'}`, 'error');
+        }
+    } catch (e) {
+        btn.textContent = originalText;
+        btn.disabled = false;
+        errorEl.textContent = 'Network error: ' + e.message;
+        errorEl.style.display = 'block';
+    }
 }
 
 // Display no updates message
