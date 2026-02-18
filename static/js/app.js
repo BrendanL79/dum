@@ -25,6 +25,8 @@ const IMAGE_PRESETS = [
 let socket;
 let isDaemonRunning = false;
 let imageConfigs = [];  // Array of image config objects
+let logUnreadCount = 0;
+let activeTab = 'updates'; // track current tab
 
 // ── Theme management ─────────────────────────────────────────────────────
 const THEME_KEY = 'ium-theme'; // values: 'light', 'dark', 'system'
@@ -1098,6 +1100,12 @@ function addLog(message, level = 'info') {
     const timestamp = new Date().toLocaleTimeString();
     entry.textContent = `[${timestamp}] ${message}`;
     dom.logOutput.appendChild(entry);
+
+    if (activeTab !== 'log') {
+        logUnreadCount++;
+        updateLogBadge();
+    }
+
     dom.logOutput.scrollTop = dom.logOutput.scrollHeight;
 
     // Keep only last 100 lines
@@ -1108,21 +1116,37 @@ function addLog(message, level = 'info') {
 
 // Tab switching
 function switchTab(tabName) {
-    // Update tab buttons
+    activeTab = tabName;
+
     document.querySelectorAll('.tab-button').forEach(btn => {
         btn.classList.remove('active');
-        if (btn.dataset.tab === tabName) {
-            btn.classList.add('active');
-        }
+        if (btn.dataset.tab === tabName) btn.classList.add('active');
     });
-    
-    // Update tab panes
+
     document.querySelectorAll('.tab-pane').forEach(pane => {
         pane.classList.remove('active');
-        if (pane.id === tabName) {
-            pane.classList.add('active');
-        }
+        if (pane.id === tabName) pane.classList.add('active');
     });
+
+    if (tabName === 'log') {
+        logUnreadCount = 0;
+        updateLogBadge();
+        // Scroll to bottom when opening
+        if (dom.logOutput) {
+            dom.logOutput.scrollTop = dom.logOutput.scrollHeight;
+        }
+    }
+}
+
+function updateLogBadge() {
+    const badge = document.getElementById('log-badge');
+    if (!badge) return;
+    if (logUnreadCount > 0) {
+        badge.textContent = logUnreadCount > 99 ? '99+' : logUnreadCount;
+        badge.style.display = '';
+    } else {
+        badge.style.display = 'none';
+    }
 }
 
 // Initialize everything when DOM is ready
@@ -1166,7 +1190,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // Event listeners
     dom.checkNow.addEventListener('click', checkNow);
     dom.toggleDaemon.addEventListener('click', toggleDaemon);
-    document.getElementById('refresh-config').addEventListener('click', loadConfig);
     dom.saveConfigBtn.addEventListener('click', saveConfig);
     dom.addImageBtn.addEventListener('click', addNewImage);
     document.getElementById('add-preset').addEventListener('click', showPresetModal);
