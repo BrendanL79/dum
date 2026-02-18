@@ -496,8 +496,8 @@ function createImageCard(config, index, isNew = false) {
                 </div>
                 <div class="pattern-detect-row">
                     <button type="button" class="btn btn-secondary btn-sm btn-detect-patterns"
-                            title="Fetch tags from registry and suggest regex patterns">
-                        Detect Patterns
+                            title="Fetch tags from registry and suggest a regex pattern">
+                        Suggest Pattern
                     </button>
                     <span class="detect-status"></span>
                 </div>
@@ -640,11 +640,11 @@ function attachCardEventListeners(card, index) {
     // Auto-populate container name and detect patterns when image name is entered
     imageInput.addEventListener('blur', () => {
         const imageName = imageInput.value.trim();
-        if (imageName) {
-            // Auto-detect patterns if regex is empty
-            if (!regexInput.value.trim()) {
-                detectPatterns(card, 3);
-            }
+        if (imageName && !regexInput.value.trim()) {
+            const status = card.querySelector('.detect-status');
+            status.className = 'detect-status loading';
+            status.textContent = 'Detecting\u2026';
+            detectPatterns(card, 3);
         }
     });
 
@@ -797,6 +797,18 @@ async function detectPatterns(card, maxPatterns = 0) {
             ? `Top ${patterns.length} of ${data.patterns.length}`
             : `${data.patterns.length}`;
         status.textContent = `${shown} pattern(s) found from ${data.total_tags} tags`;
+
+        // Auto-select if triggered automatically (maxPatterns > 0) and there's a dominant pattern
+        if (maxPatterns > 0 && patterns.length === 1) {
+            const regexInput = card.querySelector('input[name="regex"]');
+            if (!regexInput.value.trim()) {
+                regexInput.value = patterns[0].regex;
+                validateRegex(regexInput);
+                updateRegexTest(card);
+                status.textContent += ' (auto-applied)';
+                dropdown.style.display = 'none'; // hide the dropdown; it's already applied
+            }
+        }
 
         // Populate base tag dropdown if base_tag field is empty
         const baseTagInput = card.querySelector('input[name="base_tag"]');
