@@ -985,9 +985,12 @@ class DockerImageUpdater:
                     pass
                 return False
 
-            # Success - remove old container
+            # Success - remove old container (best-effort; new container is already running)
             self.logger.info(f"Removing old container {backup_name}")
-            self.docker.remove_container(backup_name, force=True, timeout=60)
+            try:
+                self.docker.remove_container(backup_name, force=True, timeout=120)
+            except (TimeoutError, OSError, DockerAPIError) as e:
+                self.logger.warning(f"Could not remove backup container {backup_name}: {e} — remove it manually")
 
             self.logger.info(f"Successfully updated container {container_name}")
             return True
