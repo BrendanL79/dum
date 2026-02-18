@@ -369,14 +369,6 @@ h1 {
     gap: 15px;
 }
 
-.image-cards-container:empty::after {
-    content: "No images configured. Click '+ Add Image' to get started.";
-    color: var(--text-secondary);
-    text-align: center;
-    padding: 40px;
-    display: block;
-}
-
 /* Individual Card */
 .image-card {
     background: var(--background);

@@ -428,6 +428,20 @@ async function testNotification(type) {
 // Render all image cards
 function renderImageCards() {
     dom.imageCards.innerHTML = '';
+
+    if (imageConfigs.length === 0) {
+        dom.imageCards.innerHTML = `
+            <div class="config-empty-state">
+                <p>No images configured yet.</p>
+                <div class="empty-actions">
+                    <button class="btn btn-primary" onclick="addNewImage()">+ Add Image</button>
+                    <button class="btn btn-secondary" onclick="showPresetModal()">Add from Preset</button>
+                </div>
+            </div>
+        `;
+        return;
+    }
+
     imageConfigs.forEach((config, index) => {
         const card = createImageCard(config, index);
         dom.imageCards.appendChild(card);
