@@ -20,13 +20,13 @@
                     <span id="daemon-status-text">Daemon: Stopped</span>
                 </span>
                 <span id="last-check"></span>
+                <button id="theme-toggle" class="btn-icon btn-theme-toggle" title="Toggle dark/light mode" aria-label="Toggle theme">&#9681;</button>
             </div>
         </header>
 
         <div class="controls">
             <button id="check-now" class="btn btn-primary">Check Now</button>
             <button id="toggle-daemon" class="btn btn-secondary">Start Daemon</button>
-            <button id="refresh-config" class="btn btn-secondary">Refresh Config</button>
             <label class="daemon-interval">
                 Interval (seconds):
                 <input type="number" id="daemon-interval" value="3600" min="60">
@@ -37,6 +37,7 @@
             <button class="tab-button active" data-tab="updates">Updates</button>
             <button class="tab-button" data-tab="config">Configuration</button>
             <button class="tab-button" data-tab="history">History</button>
+            <button class="tab-button" data-tab="log">Log <span id="log-badge" class="tab-badge" style="display:none"></span></button>
         </div>
 
         <div class="tab-content">
@@ -48,6 +49,10 @@
             </div>
 
             <div id="config" class="tab-pane">
+                <div id="unsaved-banner" class="unsaved-banner" style="display:none">
+                    You have unsaved changes &mdash;
+                    <button class="btn btn-sm btn-primary" onclick="saveConfig()">Save Now</button>
+                </div>
                 <h2>Configuration</h2>
                 <div id="config-editor">
                     <div class="config-toolbar">
@@ -122,11 +127,11 @@
                     <p>Loading history...</p>
                 </div>
             </div>
-        </div>
 
-        <div class="log-section">
-            <h3>Activity Log</h3>
-            <div id="log-output" class="log-output"></div>
+            <div id="log" class="tab-pane">
+                <h2>Activity Log</h2>
+                <div id="log-output" class="log-output" style="height: 400px;"></div>
+            </div>
         </div>
 
         <footer class="app-footer">
