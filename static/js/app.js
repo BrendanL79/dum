@@ -27,6 +27,7 @@ let isDaemonRunning = false;
 let imageConfigs = [];  // Array of image config objects
 let logUnreadCount = 0;
 let activeTab = 'updates'; // track current tab
+let configDirty = false;
 
 // ── Theme management ─────────────────────────────────────────────────────
 const THEME_KEY = 'ium-theme'; // values: 'light', 'dark', 'system'
@@ -583,12 +584,14 @@ function attachCardEventListeners(card, index) {
 
     // Update card title when image name changes
     imageInput.addEventListener('input', () => {
+        markConfigDirty();
         const nameSpan = card.querySelector('.card-image-name');
         nameSpan.textContent = imageInput.value || 'New Image';
     });
 
     // Validate regex pattern
     regexInput.addEventListener('input', () => {
+        markConfigDirty();
         validateRegex(regexInput);
         updateRegexTest(card);
     });
@@ -633,11 +636,19 @@ function attachCardEventListeners(card, index) {
 
     // Update badges when auto_update or base_tag changes
     autoUpdateCheckbox.addEventListener('change', () => {
+        markConfigDirty();
         updateCardBadges(card);
     });
     baseTagInput.addEventListener('input', () => {
+        markConfigDirty();
         updateCardBadges(card);
     });
+
+    // Track dirty for cleanup checkbox and keep_versions
+    const cleanupCheckbox = card.querySelector('input[name="cleanup_old_images"]');
+    const keepVersionsInput = card.querySelector('input[name="keep_versions"]');
+    if (cleanupCheckbox) cleanupCheckbox.addEventListener('change', markConfigDirty);
+    if (keepVersionsInput) keepVersionsInput.addEventListener('input', markConfigDirty);
 }
 
 // Toggle card expand/collapse state
@@ -830,6 +841,7 @@ function addNewImage() {
         registry: ''
     };
 
+    markConfigDirty();
     imageConfigs.push(newConfig);
     const card = createImageCard(newConfig, imageConfigs.length - 1, true);
     dom.imageCards.appendChild(card);
@@ -972,6 +984,7 @@ function showDeleteConfirmation(index) {
 
 // Delete image from list
 function deleteImage(index) {
+    markConfigDirty();
     imageConfigs.splice(index, 1);
     renderImageCards();
     addLog('Image removed (save to apply changes)', 'warning');
@@ -1071,6 +1084,8 @@ async function saveConfig() {
         if (response.ok) {
             addLog('Configuration saved successfully', 'info');
             imageConfigs = configs;
+            markConfigClean();
+            showToast('Configuration saved', 'success');
 
             // Remove "is-new" class from all cards
             dom.imageCards.querySelectorAll('.image-card.is-new').forEach(card => {
@@ -1235,6 +1250,19 @@ function updateLogBadge() {
     } else {
         badge.style.display = 'none';
     }
+}
+
+function markConfigDirty() {
+    if (configDirty) return;
+    configDirty = true;
+    const banner = document.getElementById('unsaved-banner');
+    if (banner) banner.style.display = '';
+}
+
+function markConfigClean() {
+    configDirty = false;
+    const banner = document.getElementById('unsaved-banner');
+    if (banner) banner.style.display = 'none';
 }
 
 // Initialize everything when DOM is ready
