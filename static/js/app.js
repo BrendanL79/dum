@@ -28,6 +28,7 @@ let imageConfigs = [];  // Array of image config objects
 let logUnreadCount = 0;
 let activeTab = 'updates'; // track current tab
 let configDirty = false;
+let notifDirty = false;
 
 // ── Theme management ─────────────────────────────────────────────────────
 const THEME_KEY = 'ium-theme'; // values: 'light', 'dark', 'system'
@@ -1289,6 +1290,20 @@ function markConfigClean() {
     configDirty = false;
     const banner = document.getElementById('unsaved-banner');
     if (banner) banner.style.display = 'none';
+    markNotifClean();
+}
+
+function markNotifDirty() {
+    if (notifDirty) return;
+    notifDirty = true;
+    const banner = document.getElementById('unsaved-banner-notifications');
+    if (banner) banner.style.display = '';
+}
+
+function markNotifClean() {
+    notifDirty = false;
+    const banner = document.getElementById('unsaved-banner-notifications');
+    if (banner) banner.style.display = 'none';
 }
 
 // Initialize everything when DOM is ready
@@ -1321,6 +1336,12 @@ document.addEventListener('DOMContentLoaded', () => {
     dom.webhookMethod = document.getElementById('webhook-method');
     dom.webhookBodyTemplate = document.getElementById('webhook-body-template');
     dom.webhookTestStatus = document.getElementById('webhook-test-status');
+    dom.saveNotifBtn = document.getElementById('save-notifications-config');
+    dom.ntfyUrl.addEventListener('input', markNotifDirty);
+    dom.ntfyPriority.addEventListener('change', markNotifDirty);
+    dom.webhookUrl.addEventListener('input', markNotifDirty);
+    dom.webhookMethod.addEventListener('change', markNotifDirty);
+    dom.webhookBodyTemplate.addEventListener('input', markNotifDirty);
 
     // Load version into footer
     fetch('/api/version').then(r => r.json()).then(data => {
@@ -1333,6 +1354,7 @@ document.addEventListener('DOMContentLoaded', () => {
     dom.checkNow.addEventListener('click', checkNow);
     dom.toggleDaemon.addEventListener('click', toggleDaemon);
     dom.saveConfigBtn.addEventListener('click', saveConfig);
+    dom.saveNotifBtn.addEventListener('click', saveConfig);
     dom.addImageBtn.addEventListener('click', addNewImage);
     document.getElementById('add-preset').addEventListener('click', showPresetModal);
     document.getElementById('test-ntfy').addEventListener('click', () => testNotification('ntfy'));
