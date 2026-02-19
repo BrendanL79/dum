@@ -1337,12 +1337,6 @@ document.addEventListener('DOMContentLoaded', () => {
     dom.webhookBodyTemplate = document.getElementById('webhook-body-template');
     dom.webhookTestStatus = document.getElementById('webhook-test-status');
     dom.saveNotifBtn = document.getElementById('save-notifications-config');
-    dom.ntfyUrl.addEventListener('input', markNotifDirty);
-    dom.ntfyPriority.addEventListener('change', markNotifDirty);
-    dom.webhookUrl.addEventListener('input', markNotifDirty);
-    dom.webhookMethod.addEventListener('change', markNotifDirty);
-    dom.webhookBodyTemplate.addEventListener('input', markNotifDirty);
-
     // Load version into footer
     fetch('/api/version').then(r => r.json()).then(data => {
         dom.appVersion.textContent = `ium v${data.version}`;
@@ -1357,6 +1351,12 @@ document.addEventListener('DOMContentLoaded', () => {
     dom.saveNotifBtn.addEventListener('click', saveConfig);
     dom.addImageBtn.addEventListener('click', addNewImage);
     document.getElementById('add-preset').addEventListener('click', showPresetModal);
+
+    dom.ntfyUrl.addEventListener('input', markNotifDirty);
+    dom.ntfyPriority.addEventListener('change', markNotifDirty);
+    dom.webhookUrl.addEventListener('input', markNotifDirty);
+    dom.webhookMethod.addEventListener('change', markNotifDirty);
+    dom.webhookBodyTemplate.addEventListener('input', markNotifDirty);
     document.getElementById('test-ntfy').addEventListener('click', () => testNotification('ntfy'));
     document.getElementById('test-webhook').addEventListener('click', () => testNotification('webhook'));
 
