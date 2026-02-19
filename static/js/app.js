@@ -963,6 +963,7 @@ function addFromPreset(preset) {
         registry: preset.registry || ''
     };
 
+    markConfigDirty();
     imageConfigs.push(newConfig);
     const card = createImageCard(newConfig, imageConfigs.length - 1, true);
     dom.imageCards.appendChild(card);
