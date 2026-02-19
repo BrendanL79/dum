@@ -35,7 +35,8 @@
 
         <div class="tabs">
             <button class="tab-button active" data-tab="updates">Updates</button>
-            <button class="tab-button" data-tab="config">Configuration</button>
+            <button class="tab-button" data-tab="config">Images</button>
+            <button class="tab-button" data-tab="notifications">Notifications</button>
             <button class="tab-button" data-tab="history">History</button>
             <button class="tab-button" data-tab="log">Log <span id="log-badge" class="tab-badge" style="display:none"></span></button>
         </div>
@@ -53,7 +54,7 @@
                     You have unsaved changes &mdash;
                     <button class="btn btn-sm btn-primary" onclick="saveConfig()">Save Now</button>
                 </div>
-                <h2>Configuration</h2>
+                <h2>Images</h2>
                 <div id="config-editor">
                     <div class="config-toolbar">
                         <button id="add-image" class="btn btn-primary">+ Add Image</button>
@@ -63,60 +64,67 @@
                     <div id="image-cards" class="image-cards-container">
                         <!-- Cards dynamically inserted by JavaScript -->
                     </div>
+                </div>
+            </div>
 
-                    <div id="notifications-section" class="notifications-section">
-                        <h3 class="notifications-heading">Notifications</h3>
+            <div id="notifications" class="tab-pane">
+                <div id="unsaved-banner-notifications" class="unsaved-banner" style="display:none">
+                    You have unsaved changes &mdash;
+                    <button class="btn btn-sm btn-primary" onclick="saveConfig()">Save Now</button>
+                </div>
+                <h2>Notifications</h2>
+                <div class="config-toolbar">
+                    <button id="save-notifications-config" class="btn btn-success">Save Notifications</button>
+                </div>
 
-                        <div class="notification-block">
-                            <h4>ntfy.sh</h4>
-                            <div class="form-group">
-                                <label>Topic URL</label>
-                                <input type="text" id="ntfy-url" class="form-input"
-                                       placeholder="https://ntfy.sh/my-topic">
-                            </div>
-                            <div class="form-group">
-                                <label>Priority</label>
-                                <select id="ntfy-priority" class="form-input">
-                                    <option value="min">min</option>
-                                    <option value="low">low</option>
-                                    <option value="default" selected>default</option>
-                                    <option value="high">high</option>
-                                    <option value="urgent">urgent</option>
-                                </select>
-                            </div>
-                            <div class="notification-actions">
-                                <button id="test-ntfy" class="btn btn-secondary btn-sm">Test</button>
-                                <span id="ntfy-test-status" class="detect-status"></span>
-                            </div>
+                <div class="notification-block">
+                    <h4>ntfy.sh</h4>
+                    <div class="form-group">
+                        <label>Topic URL</label>
+                        <input type="text" id="ntfy-url" class="form-input"
+                               placeholder="https://ntfy.sh/my-topic">
+                    </div>
+                    <div class="form-group">
+                        <label>Priority</label>
+                        <select id="ntfy-priority" class="form-input">
+                            <option value="min">min</option>
+                            <option value="low">low</option>
+                            <option value="default" selected>default</option>
+                            <option value="high">high</option>
+                            <option value="urgent">urgent</option>
+                        </select>
+                    </div>
+                    <div class="notification-actions">
+                        <button id="test-ntfy" class="btn btn-secondary btn-sm">Test</button>
+                        <span id="ntfy-test-status" class="detect-status"></span>
+                    </div>
+                </div>
+
+                <div class="notification-block">
+                    <h4>Webhook</h4>
+                    <div class="form-group">
+                        <label>URL</label>
+                        <input type="text" id="webhook-url" class="form-input"
+                               placeholder="https://hooks.example.com/...">
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Method</label>
+                            <select id="webhook-method" class="form-input">
+                                <option value="POST" selected>POST</option>
+                                <option value="PUT">PUT</option>
+                            </select>
                         </div>
-
-                        <div class="notification-block">
-                            <h4>Webhook</h4>
-                            <div class="form-group">
-                                <label>URL</label>
-                                <input type="text" id="webhook-url" class="form-input"
-                                       placeholder="https://hooks.example.com/...">
-                            </div>
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label>Method</label>
-                                    <select id="webhook-method" class="form-input">
-                                        <option value="POST" selected>POST</option>
-                                        <option value="PUT">PUT</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="form-group">
-                                <label>Body Template <span class="field-hint">(optional)</span></label>
-                                <textarea id="webhook-body-template" class="form-input" rows="3"
-                                          placeholder='{"content": "Update: $image \u2192 $new_version"}'></textarea>
-                                <span class="field-hint">Variables: $image, $old_version, $new_version, $event, $digest, $auto_update. Leave blank to send the raw JSON payload.</span>
-                            </div>
-                            <div class="notification-actions">
-                                <button id="test-webhook" class="btn btn-secondary btn-sm">Test</button>
-                                <span id="webhook-test-status" class="detect-status"></span>
-                            </div>
-                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Body Template <span class="field-hint">(optional)</span></label>
+                        <textarea id="webhook-body-template" class="form-input" rows="3"
+                                  placeholder='{"content": "Update: $image → $new_version"}'></textarea>
+                        <span class="field-hint">Variables: $image, $old_version, $new_version, $event, $digest, $auto_update. Leave blank to send the raw JSON payload.</span>
+                    </div>
+                    <div class="notification-actions">
+                        <button id="test-webhook" class="btn btn-secondary btn-sm">Test</button>
+                        <span id="webhook-test-status" class="detect-status"></span>
                     </div>
                 </div>
             </div>
