@@ -116,7 +116,7 @@ class TestUpdateContainersRegistryForwarding:
                 ["homarr"], "homarr-labs/homarr", "v1.9.0", registry="ghcr.io"
             )
 
-        mock_update.assert_called_once_with("homarr", "homarr-labs/homarr", "v1.9.0", "ghcr.io")
+        mock_update.assert_called_once_with("homarr", "homarr-labs/homarr", "v1.9.0", "ghcr.io", start=True)
 
     def test_registry_forwarded_to_every_container(self, ghcr_updater):
         with patch.object(ghcr_updater, "_update_container", return_value=True) as mock_update:
