@@ -1271,6 +1271,7 @@ class DockerImageUpdater:
 
             # Discover all containers using this image
             containers = self._get_containers_for_image(image)
+            running_containers = [c for c in containers if c['state'] == 'running']
 
             if not saved_state or saved_state.digest != digest:
                 # Determine current version (from saved state or first container)
@@ -1310,17 +1311,20 @@ class DockerImageUpdater:
                         if self._pull_image(image, base_tag, registry):
                             self._pull_image(image, matching_tag, registry)
 
-                            if containers:
-                                # Update all discovered containers
-                                container_names = [c['name'] for c in containers]
-                                self.logger.info(f"Found {len(containers)} container(s) using {image}: {', '.join(container_names)}")
+                            if running_containers:
+                                # Update all running containers
+                                container_names = [c['name'] for c in running_containers]
+                                self.logger.info(f"Found {len(running_containers)} running container(s) using {image}: {', '.join(container_names)}")
                                 update_results = self._update_containers(container_names, image, matching_tag, registry)
 
                                 # Success if any container updated
                                 update_ok = any(update_results.values()) if update_results else True
                             else:
-                                # No containers - just image update
-                                self.logger.info(f"No containers found for {image}, image updated only")
+                                if containers:
+                                    skipped = [c['name'] for c in containers]
+                                    self.logger.info(f"No running containers for {image} — skipping container update ({', '.join(skipped)} not running), image updated only")
+                                else:
+                                    self.logger.info(f"No containers found for {image}, image updated only")
                                 update_ok = True
 
                             # Only cleanup old images after a successful update,
@@ -1374,13 +1378,17 @@ class DockerImageUpdater:
                         if self._pull_image(image, base_tag, registry):
                             self._pull_image(image, matching_tag, registry)
 
-                            if containers:
-                                container_names = [c['name'] for c in containers]
-                                self.logger.info(f"Found {len(containers)} container(s) using {image}: {', '.join(container_names)}")
+                            if running_containers:
+                                container_names = [c['name'] for c in running_containers]
+                                self.logger.info(f"Found {len(running_containers)} running container(s) using {image}: {', '.join(container_names)}")
                                 update_results = self._update_containers(container_names, image, matching_tag, registry)
                                 update_ok = any(update_results.values()) if update_results else True
                             else:
-                                self.logger.info(f"No containers found for {image}, image updated only")
+                                if containers:
+                                    skipped = [c['name'] for c in containers]
+                                    self.logger.info(f"No running containers for {image} — skipping container update ({', '.join(skipped)} not running), image updated only")
+                                else:
+                                    self.logger.info(f"No containers found for {image}, image updated only")
                                 update_ok = True
 
                             if update_ok and cleanup:
