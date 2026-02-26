@@ -981,8 +981,21 @@ class DockerImageUpdater:
                 try:
                     self.docker.rename_container(backup_name, container_name)
                     self.docker.start_container(container_name)
-                except DockerAPIError:
-                    pass
+                except DockerAPIError as rb_err:
+                    # Rename failed — the new container likely took the name already
+                    # (e.g. it was created and started before an extra-network connect
+                    # failed).  Remove the stranded backup instead of leaving it.
+                    self.logger.warning(
+                        f"Rollback rename failed ({rb_err.message}); "
+                        f"removing stranded backup {backup_name}"
+                    )
+                    try:
+                        self.docker.remove_container(backup_name, force=True, timeout=120)
+                    except (DockerAPIError, OSError, TimeoutError) as rm_err:
+                        self.logger.warning(
+                            f"Could not remove backup container {backup_name}: {rm_err} "
+                            f"— remove it manually"
+                        )
                 return False
 
             # Success - remove old container (best-effort; new container is already running)
@@ -1160,8 +1173,18 @@ class DockerImageUpdater:
         # ── Additional networks ───────────────────────────────────
         extra_networks: List[str] = []
         if not is_container_network:
+            # Docker stores the default bridge network as 'bridge' in NetworkSettings
+            # but HostConfig.NetworkMode reports it as 'default'.  Treat the two as
+            # equivalent so we don't try to connect the new container to bridge a
+            # second time (it is already connected automatically when NetworkMode is
+            # 'default'), which would produce an "endpoint already exists" error.
+            primary_networks = {network_mode}
+            if network_mode == 'default':
+                primary_networks.add('bridge')
+            elif network_mode == 'bridge':
+                primary_networks.add('default')
             for network in ((container_info.get('NetworkSettings') or {}).get('Networks') or {}).keys():
-                if network != network_mode:
+                if network not in primary_networks:
                     extra_networks.append(network)
 
         return create_config, extra_networks
